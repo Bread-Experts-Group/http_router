@@ -3,13 +3,15 @@ import kotlin.apply
 
 plugins {
 	kotlin("jvm") version "2.1.10"
+	id("org.jetbrains.dokka-javadoc") version "2.0.0"
 	`maven-publish`
-	application
+	`java-library`
 	signing
+	application
 }
 
 group = "bread_experts_group"
-version = "1.0-SNAPSHOT"
+version = "1.1"
 
 repositories {
 	mavenCentral()
@@ -19,7 +21,7 @@ repositories {
 dependencies {
 	testImplementation(kotlin("test"))
 	implementation(kotlin("reflect"))
-	implementation("bread_experts_group:bread_server_lib-code:1.0-SNAPSHOT")
+	implementation("bread_experts_group:bread_server_lib-code:1.3.1")
 }
 
 tasks.test {
@@ -36,6 +38,11 @@ java {
 kotlin {
 	jvmToolchain(21)
 }
+tasks.register<Jar>("dokkaJavadocJar") {
+	dependsOn(tasks.dokkaGeneratePublicationJavadoc)
+	from(tasks.dokkaGeneratePublicationJavadoc.flatMap { it.outputDirectory })
+	archiveClassifier.set("javadoc")
+}
 val localProperties = Properties().apply {
 	rootProject.file("local.properties").reader().use(::load)
 }
@@ -48,6 +55,8 @@ publishing {
 		create<MavenPublication>("mavenKotlin") {
 			artifactId = "$artifactId-code"
 			from(components["kotlin"])
+			artifact(tasks.kotlinSourcesJar)
+			artifact(tasks["dokkaJavadocJar"])
 			pom {
 				name = "Routing micro-server"
 				description = "Distribution of software for Bread Experts Group operated port/shared file routing servers."
