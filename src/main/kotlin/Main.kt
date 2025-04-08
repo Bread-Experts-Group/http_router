@@ -74,20 +74,20 @@ fun main(args: Array<String>) {
 						}
 					} catch (_: SocketTimeoutException) {
 						error("Host \"$host\" not responding for request: $request")
-						HTTPResponse(503, request.version)
+						HTTPResponse(503, request.version, emptyMap(), "")
 							.write(sock.outputStream)
 						sock.close()
 						pipeSocket.close()
 					} catch (_: ConnectException) {
 						error("Host \"$host\" refused for request: $request")
-						HTTPResponse(500, request.version)
+						HTTPResponse(500, request.version, emptyMap(), "")
 							.write(sock.outputStream)
 						sock.close()
 						pipeSocket.close()
 					}
 				} else {
 					warn("No route for host \"$host\", request: $request")
-					HTTPResponse(404, request.version)
+					HTTPResponse(404, request.version, emptyMap(), "")
 						.write(sock.outputStream)
 				}
 			} catch (e: SSLException) {
