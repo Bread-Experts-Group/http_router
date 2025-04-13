@@ -49,7 +49,7 @@ fun main(args: Array<String>) {
 		}
 	}
 	val redirectionTable = buildMap {
-		multipleArgs.getValue("route").forEach { redirectionDescriptor ->
+		multipleArgs["redirect"]?.forEach { redirectionDescriptor ->
 			val (host, targetURI, permanent) = (redirectionDescriptor as String).split(',')
 			this[host] = targetURI to permanent.toBooleanStrict()
 		}
