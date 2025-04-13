@@ -15,7 +15,8 @@ fun main(args: Array<String>) {
 		Flag<Int>("port", default = 443, conv = ::stringToInt),
 		Flag<Int>("port_insecure", default = 80, conv = ::stringToInt),
 		Flag<Int>("verbosity", default = 1, conv = ::stringToInt),
-		Flag<String>("route", repeatable = true)
+		Flag<String>("route", repeatable = true),
+		Flag<String>("redirect", repeatable = true)
 	)
 	toStringVerbosity = (singleArgs["verbosity"] as? Int) ?: toStringVerbosity
 	debug("- Insecure socket retrieval")
@@ -47,6 +48,16 @@ fun main(args: Array<String>) {
 			this[host] = targetPort.toInt()
 		}
 	}
-	Thread.ofPlatform().name("Routing-Secure").start(secureOperation(secureServerSocket, routingTable))
-	Thread.ofPlatform().name("Routing-Insecure").start(insecureOperation(insecureServerSocket))
+	val redirectionTable = buildMap {
+		multipleArgs.getValue("route").forEach { redirectionDescriptor ->
+			val (host, targetURI, permanent) = (redirectionDescriptor as String).split(',')
+			this[host] = targetURI to permanent.toBooleanStrict()
+		}
+	}
+	Thread.ofPlatform().name("Routing-Secure").start(
+		secureOperation(secureServerSocket, routingTable, redirectionTable)
+	)
+	Thread.ofPlatform().name("Routing-Insecure").start(
+		insecureOperation(insecureServerSocket)
+	)
 }

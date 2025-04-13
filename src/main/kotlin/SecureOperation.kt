@@ -12,7 +12,8 @@ import javax.net.ssl.SSLServerSocket
 
 fun secureOperation(
 	secureServerSocket: SSLServerSocket,
-	routingTable: Map<String, Int>
+	routingTable: Map<String, Int>,
+	redirectionTable: Map<String, Pair<String, Boolean>>
 ) = Runnable {
 	while (true) {
 		val sock = secureServerSocket.accept()
@@ -24,6 +25,16 @@ fun secureOperation(
 					info("No host?")
 					HTTPResponse(400, request.version, emptyMap(), "")
 						.write(sock.outputStream)
+					return@start
+				}
+				val redirection = redirectionTable[host]
+				if (redirection != null) {
+					val (uri, permanent) = redirection
+					info("Redirecting (${if (permanent) "permanent" else "temporary"}), $host -> $uri${request.path}")
+					HTTPResponse(
+						if (permanent) 308 else 307, request.version,
+						mapOf("Location" to uri), ""
+					).write(sock.outputStream)
 					return@start
 				}
 				val route = routingTable[host]
