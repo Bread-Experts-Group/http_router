@@ -30,7 +30,7 @@ fun secureOperation(
 				val redirection = redirectionTable[host]
 				if (redirection != null) {
 					val (uri, permanent) = redirection
-					info("Redirecting (${if (permanent) "permanent" else "temporary"}), $host -> $uri${request.path}")
+					info("Redirecting (${if (permanent) "permanent" else "temporary"}), $host -> $uri")
 					HTTPResponse(
 						if (permanent) 308 else 307, request.version,
 						mapOf("Location" to uri), ""
