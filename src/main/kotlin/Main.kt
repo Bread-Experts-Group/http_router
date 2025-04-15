@@ -40,6 +40,10 @@ fun main(args: Array<String>) {
 		singleArgs.getValue("keystore_passphrase") as String,
 	)
 	val secureServerSocket = tlsSocket.getServerSocket()
+	secureServerSocket.sslParameters = secureServerSocket.sslParameters.also {
+		it.wantClientAuth = true
+		it.applicationProtocols = arrayOf("http/1.1")
+	}
 	logger.fine("- Secure socket (${singleArgs["port"]}) bind")
 	secureServerSocket.bind(
 		InetSocketAddress(

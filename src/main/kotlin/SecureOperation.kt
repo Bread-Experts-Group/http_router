@@ -23,13 +23,6 @@ fun secureOperation(
 		secureLogger.finer("Waiting for next socket")
 		val sock = secureServerSocket.accept() as SSLSocket
 		val localLogger = Logger.getLogger("${secureLogger.name}.${sock.remoteSocketAddress}")
-		localLogger.finer("Setting SSL parameters")
-		val parameters = sock.sslParameters
-		parameters.wantClientAuth = false
-		parameters.applicationProtocols = arrayOf("http/1.1")
-		sock.sslParameters = parameters
-		localLogger.finer("Starting SSL handshake")
-		sock.startHandshake()
 		localLogger.fine("Thread start")
 		Thread.ofVirtual().name("Routing-${sock.remoteSocketAddress}").start {
 			try {
