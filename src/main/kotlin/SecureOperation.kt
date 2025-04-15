@@ -26,7 +26,7 @@ fun secureOperation(
 		localLogger.finer("Setting SSL parameters")
 		val parameters = sock.sslParameters
 		parameters.wantClientAuth = true
-		parameters.applicationProtocols = arrayOf("h3", "h2", "http/1.1")
+		parameters.applicationProtocols = arrayOf("http/1.1")
 		sock.sslParameters = parameters
 		localLogger.finer("Starting SSL handshake")
 		sock.startHandshake()
