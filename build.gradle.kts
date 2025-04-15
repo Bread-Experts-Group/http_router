@@ -79,8 +79,8 @@ publishing {
 					}
 				}
 				scm {
-					connection = "scm:git:git://github.com/Bread-Experts-Group/bread_server_lib.git"
-					developerConnection = "scm:git:ssh://git@github.com:Bread-Experts-Group/maven_micro_server.git"
+					connection = "scm:git:git://github.com/Bread-Experts-Group/http_router.git"
+					developerConnection = "scm:git:ssh://git@github.com:Bread-Experts-Group/http_router.git"
 					url = "https://javart.zip"
 				}
 			}
