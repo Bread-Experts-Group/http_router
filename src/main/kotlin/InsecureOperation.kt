@@ -4,7 +4,10 @@ import bread_experts_group.http.HTTPRequest
 import bread_experts_group.http.HTTPResponse
 import java.io.IOException
 import java.net.ServerSocket
+import java.util.logging.Logger
 import javax.net.ssl.SSLException
+
+private val insecureLogger = Logger.getLogger("HTTP Routing, Insecure")
 
 fun insecureOperation(
 	insecureServerSocket: ServerSocket
@@ -16,7 +19,7 @@ fun insecureOperation(
 				val request = HTTPRequest.read(sock.inputStream)
 				val host = request.headers["Host"]
 				if (host == null) {
-					info("No host?")
+					insecureLogger.warning("No host?")
 					HTTPResponse(400, request.version, emptyMap(), "")
 						.write(sock.outputStream)
 					return@start
@@ -29,10 +32,10 @@ fun insecureOperation(
 					""
 				).write(sock.outputStream)
 			} catch (e: SSLException) {
-				warn("SSL failure encountered; ${e.localizedMessage}")
+				insecureLogger.warning { "SSL failure encountered; ${e.localizedMessage}" }
 				sock.close()
 			} catch (e: IOException) {
-				warn("IO failure encountered; ${e.localizedMessage}")
+				insecureLogger.warning { "IO failure encountered; ${e.localizedMessage}" }
 				sock.close()
 			}
 		}

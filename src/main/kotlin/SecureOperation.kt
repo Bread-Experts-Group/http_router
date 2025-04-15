@@ -7,8 +7,12 @@ import java.net.ConnectException
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.util.logging.Logger
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLServerSocket
+import javax.net.ssl.SSLSocket
+
+private val secureLogger = Logger.getLogger("HTTP Routing, Secure")
 
 fun secureOperation(
 	secureServerSocket: SSLServerSocket,
@@ -16,13 +20,34 @@ fun secureOperation(
 	redirectionTable: Map<String, Pair<String, Boolean>>
 ) = Runnable {
 	while (true) {
-		val sock = secureServerSocket.accept()
-		Thread.ofVirtual().name("Routing-${sock.localSocketAddress}<${sock.remoteSocketAddress}").start {
+		secureLogger.finer("Waiting for next socket")
+		val sock = secureServerSocket.accept() as SSLSocket
+		val localLogger = Logger.getLogger("${secureLogger.name}.${sock.remoteSocketAddress}")
+		localLogger.finer("Setting SSL parameters")
+		val parameters = sock.sslParameters
+		parameters.wantClientAuth = true
+		parameters.applicationProtocols = arrayOf("h3", "h2", "http/1.1")
+		sock.sslParameters = parameters
+		localLogger.finer("Starting SSL handshake")
+		sock.startHandshake()
+		localLogger.fine("Thread start")
+		Thread.ofVirtual().name("Routing-${sock.remoteSocketAddress}").start {
 			try {
+				localLogger.fine {
+					buildString {
+						val s = sock.session
+						appendLine("${s.protocol} ${s.cipherSuite} \"${s.peerHost}:${s.peerPort}\"")
+						appendLine("Peer Principal: ${s.peerPrincipal.name}")
+						appendLine("Peer Certificates:")
+						s.peerCertificates.forEachIndexed { index, c ->
+							appendLine(" $index: ${c.type}, pub key: (${c.publicKey.format}, ${c.publicKey.algorithm})")
+						}
+					}
+				}
 				val request = HTTPRequest.read(sock.inputStream)
 				val host = request.headers["Host"]
 				if (host == null) {
-					info("No host?")
+					localLogger.warning("No host?")
 					HTTPResponse(400, request.version, emptyMap(), "")
 						.write(sock.outputStream)
 					return@start
@@ -30,7 +55,7 @@ fun secureOperation(
 				val redirection = redirectionTable[host]
 				if (redirection != null) {
 					val (uri, permanent) = redirection
-					info("Redirecting (${if (permanent) "permanent" else "temporary"}), $host -> $uri")
+					localLogger.info { "Redirecting (${if (permanent) "permanent" else "temporary"}), $host -> $uri" }
 					HTTPResponse(
 						if (permanent) 308 else 307, request.version,
 						mapOf("Location" to uri), ""
@@ -39,7 +64,7 @@ fun secureOperation(
 				}
 				val route = routingTable[host]
 				if (route != null) {
-					info("Routing, $host${request.path} -> $route")
+					localLogger.info { "Routing, $host${request.path} -> $route" }
 					val pipeSocket = Socket()
 					try {
 						pipeSocket.connect(InetSocketAddress("localhost", route), 4000)
@@ -61,28 +86,28 @@ fun secureOperation(
 							}
 						}
 					} catch (_: SocketTimeoutException) {
-						error("Host \"$host\" not responding for request: $request")
+						localLogger.severe { "Host \"$host\" not responding for request: $request" }
 						HTTPResponse(503, request.version, emptyMap(), "")
 							.write(sock.outputStream)
 						sock.close()
 						pipeSocket.close()
 					} catch (_: ConnectException) {
-						error("Host \"$host\" refused for request: $request")
+						localLogger.severe { "Host \"$host\" refused for request: $request" }
 						HTTPResponse(500, request.version, emptyMap(), "")
 							.write(sock.outputStream)
 						sock.close()
 						pipeSocket.close()
 					}
 				} else {
-					warn("No route for host \"$host\", request: $request")
+					localLogger.warning { "No route for host \"$host\", request: $request" }
 					HTTPResponse(404, request.version, emptyMap(), "")
 						.write(sock.outputStream)
 				}
 			} catch (e: SSLException) {
-				warn("SSL failure encountered; ${e.localizedMessage}")
+				localLogger.warning { "SSL failure encountered; ${e.localizedMessage}" }
 				sock.close()
 			} catch (e: IOException) {
-				warn("IO failure encountered; ${e.localizedMessage}")
+				localLogger.warning { "IO failure encountered; ${e.localizedMessage}" }
 				sock.close()
 			}
 		}
