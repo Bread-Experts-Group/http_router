@@ -7,6 +7,7 @@ import java.net.ConnectException
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.util.logging.Level
 import java.util.logging.Logger
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLServerSocket
@@ -26,6 +27,7 @@ fun secureOperation(
 		localLogger.fine("Thread start")
 		Thread.ofVirtual().name("Routing-${sock.remoteSocketAddress}").start {
 			try {
+				localLogger.level = Level.ALL
 				localLogger.fine {
 					buildString {
 						val s = sock.session

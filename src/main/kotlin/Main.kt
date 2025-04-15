@@ -3,15 +3,10 @@ package bread_experts_group
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.ServerSocket
-import java.util.logging.Level
-import java.util.logging.LogManager
 import java.util.logging.Logger
 
 
 fun main(args: Array<String>) {
-	val rootLogger = LogManager.getLogManager().getLogger("")
-	rootLogger.setLevel(Level.FINER)
-	for (h in rootLogger.handlers) h.level = Level.FINER
 	val logger = Logger.getLogger("HTTP Routing, Main")
 	Thread.currentThread().name = "Routing-Main"
 	logger.fine("- Argument read")
