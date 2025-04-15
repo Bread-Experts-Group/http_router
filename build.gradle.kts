@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "bread_experts_group"
-version = "1.8"
+version = "1.9"
 
 repositories {
 	mavenCentral()
@@ -28,7 +28,8 @@ tasks.test {
 	useJUnitPlatform()
 }
 application {
-	mainClass = "bread_experts_group.MainKt"
+	mainClass = "bread_experts_group.RouterMainKt"
+	applicationDefaultJvmArgs = listOf("-XX:+UseZGC", "-XX:+ZGenerational", "-Xmx256m", "-XX:SoftMaxHeapSize=128m")
 }
 
 java {
