@@ -7,11 +7,12 @@ import java.net.ConnectException
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
-import java.util.logging.Level
 import java.util.logging.Logger
 import javax.net.ssl.SSLException
+import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLServerSocket
 import javax.net.ssl.SSLSocket
+import kotlin.collections.forEachIndexed
 
 private val secureLogger = Logger.getLogger("HTTP Routing, Secure")
 
@@ -27,15 +28,23 @@ fun secureOperation(
 		localLogger.fine("Thread start")
 		Thread.ofVirtual().name("Routing-${sock.remoteSocketAddress}").start {
 			try {
-				localLogger.level = Level.ALL
 				localLogger.fine {
 					buildString {
 						val s = sock.session
 						appendLine("${s.protocol} ${s.cipherSuite} \"${s.peerHost}:${s.peerPort}\"")
-						appendLine("Peer Principal: ${s.peerPrincipal.name}")
-						appendLine("Peer Certificates:")
-						s.peerCertificates.forEachIndexed { index, c ->
-							appendLine(" $index: ${c.type}, pub key: (${c.publicKey.format}, ${c.publicKey.algorithm})")
+						val (principal, certs) = try {
+							s.peerPrincipal to s.peerCertificates
+						} catch (_: SSLPeerUnverifiedException) {
+							null to null
+						}
+						if (principal != null && certs != null) {
+							appendLine("Peer Principal: ${principal.name}")
+							appendLine("Peer Certificates:")
+							certs.forEachIndexed { index, c ->
+								appendLine(" $index: ${c.type}, pub key: (${c.publicKey.format}, ${c.publicKey.algorithm})")
+							}
+						} else {
+							appendLine("No peer authenticity")
 						}
 					}
 				}
