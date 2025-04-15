@@ -10,7 +10,7 @@ import java.util.logging.Logger
 
 fun main(args: Array<String>) {
 	val rootLogger = LogManager.getLogManager().getLogger("")
-	rootLogger.setLevel(Level.INFO)
+	rootLogger.setLevel(Level.FINER)
 	for (h in rootLogger.handlers) h.level = Level.FINER
 	val logger = Logger.getLogger("HTTP Routing, Main")
 	Thread.currentThread().name = "Routing-Main"
