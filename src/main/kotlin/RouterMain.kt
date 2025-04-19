@@ -1,4 +1,4 @@
-package bread_experts_group
+package org.bread_experts_group
 
 import java.io.File
 import java.net.InetSocketAddress
@@ -36,10 +36,7 @@ fun main(args: Array<String>) {
 	)
 	val secureServerSocket = tlsSocket.getServerSocket()
 	secureServerSocket.enabledCipherSuites = goodSchemes
-	secureServerSocket.sslParameters = secureServerSocket.sslParameters.also {
-		it.wantClientAuth = true
-		it.applicationProtocols = arrayOf("http/1.1")
-	}
+	secureServerSocket.wantClientAuth = true
 	logger.fine("- Secure socket (${singleArgs["port"]}) bind")
 	secureServerSocket.bind(
 		InetSocketAddress(

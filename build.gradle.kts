@@ -10,25 +10,24 @@ plugins {
 	application
 }
 
-group = "bread_experts_group"
-version = "1.9"
+group = "org.bread_experts_group"
+version = "1.0.0"
 
 repositories {
 	mavenCentral()
+	mavenLocal()
 	maven { url = uri("https://maven.javart.zip/") }
 }
 
 dependencies {
-	testImplementation(kotlin("test"))
-	implementation(kotlin("reflect"))
-	implementation("bread_experts_group:bread_server_lib-code:1.16")
+	implementation("org.bread_experts_group:bread_server_lib-code:1.2.0")
 }
 
 tasks.test {
 	useJUnitPlatform()
 }
 application {
-	mainClass = "bread_experts_group.RouterMainKt"
+	mainClass = "org.bread_experts_group.RouterMainKt"
 	applicationDefaultJvmArgs = listOf("-XX:+UseZGC", "-XX:+ZGenerational", "-Xmx256m", "-XX:SoftMaxHeapSize=128m")
 }
 

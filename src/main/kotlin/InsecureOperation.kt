@@ -1,7 +1,10 @@
-package bread_experts_group
+package org.bread_experts_group
 
-import bread_experts_group.http.HTTPRequest
-import bread_experts_group.http.HTTPResponse
+import org.bread_experts_group.http.HTTPRequest
+import org.bread_experts_group.http.HTTPResponse
+import org.bread_experts_group.socket.failquick.FailQuickInputStream
+import org.bread_experts_group.socket.failquick.FailQuickOutputStream
+import java.io.EOFException
 import java.io.IOException
 import java.net.ServerSocket
 import java.util.logging.Logger
@@ -14,14 +17,16 @@ fun insecureOperation(
 ) = Runnable {
 	while (true) {
 		val sock = insecureServerSocket.accept()
+		val fqIn = FailQuickInputStream(sock.inputStream)
+		val fqOut = FailQuickOutputStream(sock.outputStream)
 		Thread.ofVirtual().name("Routing-${sock.localSocketAddress}<${sock.remoteSocketAddress}").start {
 			try {
-				val request = HTTPRequest.read(sock.inputStream)
+				val request = HTTPRequest.read(fqIn)
 				val host = request.headers["Host"]
 				if (host == null) {
 					insecureLogger.warning("No host?")
 					HTTPResponse(400, request.version, emptyMap(), "")
-						.write(sock.outputStream)
+						.write(fqOut)
 					return@start
 				}
 				HTTPResponse(
@@ -30,7 +35,8 @@ fun insecureOperation(
 						"Location" to "https://$host${request.path}"
 					),
 					""
-				).write(sock.outputStream)
+				).write(fqOut)
+			} catch (_: EOFException) {
 			} catch (e: SSLException) {
 				insecureLogger.warning { "SSL failure encountered; ${e.localizedMessage}" }
 				sock.close()
