@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "org.bread_experts_group"
-version = "1.0.0"
+version = "1.0.2"
 
 repositories {
 	mavenCentral()
@@ -20,7 +20,7 @@ repositories {
 }
 
 dependencies {
-	implementation("org.bread_experts_group:bread_server_lib-code:1.2.0")
+	implementation("org.bread_experts_group:bread_server_lib-code:1.6.1")
 }
 
 tasks.test {
@@ -98,6 +98,7 @@ publishing {
 }
 signing {
 	useGpgCmd()
+	sign(publishing.publications["mavenKotlinDist"])
 	sign(publishing.publications["mavenKotlin"])
 }
 tasks.javadoc {

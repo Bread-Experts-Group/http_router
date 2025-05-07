@@ -77,21 +77,30 @@ fun secureOperation(
 					val pipeSocket = Socket()
 					try {
 						pipeSocket.connect(InetSocketAddress("localhost", route), 4000)
-						val psFqIn = FailQuickInputStream(pipeSocket.inputStream)
-						val psFqOut = FailQuickOutputStream(pipeSocket.outputStream)
-						val carrier = ByteArray(1500)
-						try {
-							request.write(psFqOut)
-							while (true) {
-								var l = psFqIn.read(carrier)
-								sFqOut.write(carrier, 0, l)
-								l = sFqIn.read(carrier)
-								psFqOut.write(carrier, 0, l)
-							}
-						} catch (_: EOFException) {
-							psFqIn.close()
-							psFqOut.close()
+						val a = Thread.ofVirtual().start {
+							pipeSocket.inputStream.transferTo(sock.outputStream)
 						}
+						val b = Thread.ofVirtual().start {
+							sock.inputStream.transferTo(pipeSocket.outputStream)
+						}
+						request.write(pipeSocket.outputStream)
+						a.join()
+						b.join()
+//						val psFqIn = FailQuickInputStream(pipeSocket.inputStream)
+//						val psFqOut = FailQuickOutputStream(pipeSocket.outputStream)
+//						val carrier = ByteArray(1500)
+//						try {
+//							request.write(psFqOut)
+//							while (true) {
+//								var l = psFqIn.read(carrier)
+//								sFqOut.write(carrier, 0, l)
+//								l = sFqIn.read(carrier)
+//								psFqOut.write(carrier, 0, l)
+//							}
+//						} catch (_: EOFException) {
+//							psFqIn.close()
+//							psFqOut.close()
+//						}
 					} catch (_: SocketTimeoutException) {
 						localLogger.severe { "Host \"$host\" not responding for request: $request" }
 						HTTPResponse(503, request.version, emptyMap(), "")
