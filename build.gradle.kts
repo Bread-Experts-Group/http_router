@@ -11,16 +11,15 @@ plugins {
 }
 
 group = "org.bread_experts_group"
-version = "1.0.2"
+version = "2.1.0"
 
 repositories {
 	mavenCentral()
-	mavenLocal()
 	maven { url = uri("https://maven.javart.zip/") }
 }
 
 dependencies {
-	implementation("org.bread_experts_group:bread_server_lib-code:1.6.1")
+	implementation("org.bread_experts_group:bread_server_lib-code:2.1.6")
 }
 
 tasks.test {

@@ -5,7 +5,6 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.util.logging.Logger
 
-
 fun main(args: Array<String>) {
 	val logger = Logger.getLogger("HTTP Routing, Main")
 	Thread.currentThread().name = "Routing-Main"

@@ -2,14 +2,14 @@ package org.bread_experts_group
 
 import org.bread_experts_group.http.HTTPRequest
 import org.bread_experts_group.http.HTTPResponse
-import org.bread_experts_group.socket.failquick.FailQuickInputStream
-import org.bread_experts_group.socket.failquick.FailQuickOutputStream
+import org.bread_experts_group.http.HTTPVersion
 import java.io.EOFException
 import java.io.IOException
 import java.net.ConnectException
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.net.URISyntaxException
 import java.util.logging.Logger
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLPeerUnverifiedException
@@ -30,8 +30,6 @@ fun secureOperation(
 		val localLogger = Logger.getLogger("${secureLogger.name}.${sock.remoteSocketAddress}")
 		localLogger.fine("Thread start")
 		Thread.ofVirtual().name("Routing-${sock.remoteSocketAddress}").start {
-			val sFqIn = FailQuickInputStream(sock.inputStream)
-			val sFqOut = FailQuickOutputStream(sock.outputStream)
 			try {
 				localLogger.fine {
 					buildString {
@@ -46,20 +44,25 @@ fun secureOperation(
 							appendLine("Peer Principal: ${principal.name}")
 							appendLine("Peer Certificates:")
 							certs.forEachIndexed { index, c ->
-								appendLine(" $index: ${c.type}, pub key: (${c.publicKey.format}, ${c.publicKey.algorithm})")
+								appendLine(" $index: ${c.type}, pubkey: (${c.publicKey.format}, ${c.publicKey.algorithm})")
 							}
 						} else {
 							appendLine("No peer authenticity")
 						}
 					}
 				}
-				val request = HTTPRequest.read(sFqIn)
+				val request = try {
+					HTTPRequest.read(sock.inputStream)
+				} catch (_: URISyntaxException) {
+					HTTPResponse(400, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
+						.write(sock.outputStream)
+					throw EOFException()
+				}
 				val host = request.headers["Host"]
 				if (host == null) {
-					localLogger.warning("No host?")
-					HTTPResponse(400, request.version, emptyMap(), "")
-						.write(sFqOut)
-					return@start
+					HTTPResponse(400, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
+						.write(sock.outputStream)
+					throw EOFException()
 				}
 				val redirection = redirectionTable[host]
 				if (redirection != null) {
@@ -67,9 +70,12 @@ fun secureOperation(
 					localLogger.info { "Redirecting (${if (permanent) "permanent" else "temporary"}), $host -> $uri" }
 					HTTPResponse(
 						if (permanent) 308 else 307, request.version,
-						mapOf("Location" to uri), ""
-					).write(sFqOut)
-					return@start
+						mapOf(
+							"Location" to uri,
+							"Connection" to "close"
+						)
+					).write(sock.outputStream)
+					throw EOFException()
 				}
 				val route = routingTable[host]
 				if (route != null) {
@@ -86,35 +92,20 @@ fun secureOperation(
 						request.write(pipeSocket.outputStream)
 						a.join()
 						b.join()
-//						val psFqIn = FailQuickInputStream(pipeSocket.inputStream)
-//						val psFqOut = FailQuickOutputStream(pipeSocket.outputStream)
-//						val carrier = ByteArray(1500)
-//						try {
-//							request.write(psFqOut)
-//							while (true) {
-//								var l = psFqIn.read(carrier)
-//								sFqOut.write(carrier, 0, l)
-//								l = sFqIn.read(carrier)
-//								psFqOut.write(carrier, 0, l)
-//							}
-//						} catch (_: EOFException) {
-//							psFqIn.close()
-//							psFqOut.close()
-//						}
 					} catch (_: SocketTimeoutException) {
 						localLogger.severe { "Host \"$host\" not responding for request: $request" }
-						HTTPResponse(503, request.version, emptyMap(), "")
-							.write(sFqOut)
+						HTTPResponse(503, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
+							.write(sock.outputStream)
 					} catch (_: ConnectException) {
 						localLogger.severe { "Host \"$host\" refused for request: $request" }
-						HTTPResponse(500, request.version, emptyMap(), "")
-							.write(sFqOut)
+						HTTPResponse(500, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
+							.write(sock.outputStream)
 					}
 					pipeSocket.close()
 				} else {
 					localLogger.warning { "No route for host \"$host\", request: $request" }
-					HTTPResponse(404, request.version, emptyMap(), "")
-						.write(sFqOut)
+					HTTPResponse(404, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
+						.write(sock.outputStream)
 				}
 			} catch (_: EOFException) {
 			} catch (e: SSLException) {
@@ -122,8 +113,6 @@ fun secureOperation(
 			} catch (e: IOException) {
 				localLogger.warning { "IO failure encountered; ${e.localizedMessage}" }
 			}
-			sFqIn.close()
-			sFqOut.close()
 			sock.close()
 		}
 	}
