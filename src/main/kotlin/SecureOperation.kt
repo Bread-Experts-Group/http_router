@@ -8,6 +8,7 @@ import java.io.IOException
 import java.net.ConnectException
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.URISyntaxException
 import java.util.logging.Logger
@@ -112,6 +113,8 @@ fun secureOperation(
 				localLogger.warning { "SSL failure encountered; ${e.localizedMessage}" }
 			} catch (e: IOException) {
 				localLogger.warning { "IO failure encountered; ${e.localizedMessage}" }
+			} catch (e: SocketException) {
+				localLogger.warning { "Socket failure encountered; ${e.localizedMessage}" }
 			}
 			sock.close()
 		}
