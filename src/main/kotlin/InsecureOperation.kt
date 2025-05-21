@@ -3,13 +3,11 @@ package org.bread_experts_group
 import org.bread_experts_group.http.HTTPRequest
 import org.bread_experts_group.http.HTTPResponse
 import org.bread_experts_group.http.HTTPVersion
-import java.io.EOFException
+import org.bread_experts_group.stream.FailQuickInputStream
 import java.io.IOException
 import java.net.ServerSocket
-import java.net.SocketException
 import java.net.URISyntaxException
 import java.util.logging.Logger
-import javax.net.ssl.SSLException
 
 private val insecureLogger = Logger.getLogger("HTTP Routing, Insecure")
 
@@ -19,11 +17,16 @@ fun insecureOperation(
 	while (true) {
 		insecureLogger.finer("Waiting for next socket")
 		val sock = insecureServerSocket.accept()
-		val localLogger = Logger.getLogger("${insecureLogger.name}.${sock.remoteSocketAddress}")
+		sock.keepAlive = true
+		sock.soTimeout = 60000
+		sock.setSoLinger(true, 2)
 		Thread.ofVirtual().name("Routing-${sock.localSocketAddress}<${sock.remoteSocketAddress}").start {
+			val localLogger = Logger.getLogger("${insecureLogger.name}.${sock.remoteSocketAddress}")
 			try {
+				localLogger.fine("Thread start")
+				val fqIn = FailQuickInputStream(sock.inputStream)
 				val request = try {
-					HTTPRequest.read(sock.inputStream)
+					HTTPRequest.read(fqIn)
 				} catch (_: URISyntaxException) {
 					HTTPResponse(400, HTTPVersion.HTTP_1_1)
 						.write(sock.outputStream)
@@ -43,13 +46,12 @@ fun insecureOperation(
 						"Connection" to "close"
 					)
 				).write(sock.outputStream)
-			} catch (_: EOFException) {
+			} catch (_: FailQuickInputStream.EndOfStream) {
 			} catch (e: IOException) {
 				localLogger.warning { "IO failure encountered; ${e.localizedMessage}" }
-			} catch (e: SocketException) {
-				localLogger.warning { "Socket failure encountered; ${e.localizedMessage}" }
+			} finally {
+				sock.close()
 			}
-			sock.close()
 		}
 	}
 }

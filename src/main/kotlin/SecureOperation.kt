@@ -3,16 +3,14 @@ package org.bread_experts_group
 import org.bread_experts_group.http.HTTPRequest
 import org.bread_experts_group.http.HTTPResponse
 import org.bread_experts_group.http.HTTPVersion
+import org.bread_experts_group.stream.FailQuickInputStream
 import java.io.EOFException
 import java.io.IOException
-import java.net.ConnectException
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.URISyntaxException
 import java.util.logging.Logger
-import javax.net.ssl.SSLException
 import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLServerSocket
 import javax.net.ssl.SSLSocket
@@ -28,10 +26,13 @@ fun secureOperation(
 	while (true) {
 		secureLogger.finer("Waiting for next socket")
 		val sock = secureServerSocket.accept() as SSLSocket
-		val localLogger = Logger.getLogger("${secureLogger.name}.${sock.remoteSocketAddress}")
-		localLogger.fine("Thread start")
+		sock.keepAlive = true
+		sock.soTimeout = 60000
+		sock.setSoLinger(true, 2)
 		Thread.ofVirtual().name("Routing-${sock.remoteSocketAddress}").start {
+			val localLogger = Logger.getLogger("${secureLogger.name}.${sock.remoteSocketAddress}")
 			try {
+				localLogger.fine("Thread start")
 				localLogger.fine {
 					buildString {
 						val s = sock.session
@@ -52,8 +53,9 @@ fun secureOperation(
 						}
 					}
 				}
+				val fqIn = FailQuickInputStream(sock.inputStream)
 				val request = try {
-					HTTPRequest.read(sock.inputStream)
+					HTTPRequest.read(fqIn)
 				} catch (_: URISyntaxException) {
 					HTTPResponse(400, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
 						.write(sock.outputStream)
@@ -84,12 +86,9 @@ fun secureOperation(
 					val pipeSocket = Socket()
 					try {
 						pipeSocket.connect(InetSocketAddress("localhost", route), 4000)
-						val a = Thread.ofVirtual().start {
-							pipeSocket.inputStream.transferTo(sock.outputStream)
-						}
-						val b = Thread.ofVirtual().start {
-							sock.inputStream.transferTo(pipeSocket.outputStream)
-						}
+						val fqPIn = FailQuickInputStream(pipeSocket.inputStream)
+						val a = Thread.ofVirtual().start { fqPIn.transferTo(sock.outputStream) }
+						val b = Thread.ofVirtual().start { fqIn.transferTo(pipeSocket.outputStream) }
 						request.write(pipeSocket.outputStream)
 						a.join()
 						b.join()
@@ -97,8 +96,11 @@ fun secureOperation(
 						localLogger.severe { "Host \"$host\" not responding for request: $request" }
 						HTTPResponse(503, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
 							.write(sock.outputStream)
-					} catch (_: ConnectException) {
-						localLogger.severe { "Host \"$host\" refused for request: $request" }
+					} catch (e: IOException) {
+						localLogger.severe {
+							"Host \"$host\" refused for request " +
+									"[${e.javaClass.canonicalName}: ${e.localizedMessage}]: $request"
+						}
 						HTTPResponse(500, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
 							.write(sock.outputStream)
 					}
@@ -108,15 +110,12 @@ fun secureOperation(
 					HTTPResponse(404, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
 						.write(sock.outputStream)
 				}
-			} catch (_: EOFException) {
-			} catch (e: SSLException) {
-				localLogger.warning { "SSL failure encountered; ${e.localizedMessage}" }
+			} catch (_: FailQuickInputStream.EndOfStream) {
 			} catch (e: IOException) {
-				localLogger.warning { "IO failure encountered; ${e.localizedMessage}" }
-			} catch (e: SocketException) {
-				localLogger.warning { "Socket failure encountered; ${e.localizedMessage}" }
+				localLogger.warning { "IO failure encountered; [${e.javaClass.canonicalName}] ${e.localizedMessage}" }
+			} finally {
+				sock.close()
 			}
-			sock.close()
 		}
 	}
 }
