@@ -1,23 +1,46 @@
-package org.bread_experts_group
+package org.bread_experts_group.router
 
+import org.bread_experts_group.Flag
+import org.bread_experts_group.getServerSocket
+import org.bread_experts_group.getTLSContext
+import org.bread_experts_group.goodSchemes
+import org.bread_experts_group.logging.ColoredLogger
+import org.bread_experts_group.readArgs
+import org.bread_experts_group.stringToInt
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.ServerSocket
-import java.util.logging.Logger
 
 fun main(args: Array<String>) {
-	val logger = Logger.getLogger("HTTP Routing, Main")
+	val logger = ColoredLogger.newLogger("HTTP Routing, Main")
 	Thread.currentThread().name = "Routing-Main"
 	logger.fine("- Argument read")
 	val (singleArgs, multipleArgs) = readArgs(
 		args,
-		Flag<String>("keystore"),
-		Flag<String>("keystore_passphrase"),
-		Flag<String>("ip"),
-		Flag<Int>("port", default = 443, conv = ::stringToInt),
-		Flag<Int>("port_insecure", default = 80, conv = ::stringToInt),
-		Flag<String>("route", repeatable = true),
-		Flag<String>("redirect", repeatable = true)
+		"http_router",
+		"Distribution of software for Bread Experts Group operated port/shared file routing servers.",
+		Flag<String>(
+			"keystore", "The PKCS #12  keystore on which SSL/TLS requests will be encrypted via.",
+			required = 1
+		),
+		Flag<String>(
+			"keystore_passphrase", "The PKCS #12 keystore passphrase.",
+			required = 1
+		),
+		Flag("ip", "The IP address on which to listen to.", default = "0.0.0.0"),
+		Flag("port", "The TCP port on which to listen to for SSL/TLS requests.", default = 443, conv = ::stringToInt),
+		Flag(
+			"port_insecure", "The TCP port on which to listen to for plaintext requests.",
+			default = 80, conv = ::stringToInt
+		),
+		Flag<String>(
+			"route", "A route on which to direct requests towards, specified by the Host header.",
+			repeatable = true
+		),
+		Flag<String>(
+			"redirect", "A route on which to redirect requests to another server, specified by the Host header.",
+			repeatable = true
+		)
 	)
 	logger.fine("- Insecure socket retrieval")
 	val insecureServerSocket = ServerSocket()

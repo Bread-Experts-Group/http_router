@@ -19,14 +19,14 @@ repositories {
 }
 
 dependencies {
-	implementation("org.bread_experts_group:bread_server_lib-code:2.3.3")
+	implementation("org.bread_experts_group:bread_server_lib-code:2.5.2")
 }
 
 tasks.test {
 	useJUnitPlatform()
 }
 application {
-	mainClass = "org.bread_experts_group.RouterMainKt"
+	mainClass = "org.bread_experts_group.router.RouterMainKt"
 	applicationDefaultJvmArgs = listOf("-XX:+UseZGC", "-XX:+ZGenerational", "-Xmx256m", "-XX:SoftMaxHeapSize=128m")
 }
 

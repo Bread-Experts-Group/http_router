@@ -1,22 +1,21 @@
-package org.bread_experts_group
+package org.bread_experts_group.router
 
 import org.bread_experts_group.http.HTTPRequest
 import org.bread_experts_group.http.HTTPResponse
 import org.bread_experts_group.http.HTTPVersion
-import org.bread_experts_group.stream.FailQuickInputStream
-import java.io.EOFException
+import org.bread_experts_group.logging.ColoredLogger
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.URISyntaxException
-import java.util.logging.Logger
 import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLServerSocket
 import javax.net.ssl.SSLSocket
 import kotlin.collections.forEachIndexed
 
-private val secureLogger = Logger.getLogger("HTTP Routing, Secure")
+private val secureLogger = ColoredLogger.newLogger("HTTP Routing, Secure")
 
 fun secureOperation(
 	secureServerSocket: SSLServerSocket,
@@ -27,10 +26,10 @@ fun secureOperation(
 		secureLogger.finer("Waiting for next socket")
 		val sock = secureServerSocket.accept() as SSLSocket
 		sock.keepAlive = true
-		sock.soTimeout = 60000
+		sock.soTimeout = 25000
 		sock.setSoLinger(true, 2)
 		Thread.ofVirtual().name("Routing-${sock.remoteSocketAddress}").start {
-			val localLogger = Logger.getLogger("${secureLogger.name}.${sock.remoteSocketAddress}")
+			val localLogger = ColoredLogger.newLogger("${secureLogger.name}.${sock.remoteSocketAddress}")
 			try {
 				localLogger.fine("Thread start")
 				localLogger.fine {
@@ -53,19 +52,18 @@ fun secureOperation(
 						}
 					}
 				}
-				val fqIn = FailQuickInputStream(sock.inputStream)
 				val request = try {
-					HTTPRequest.read(fqIn)
+					HTTPRequest.read(sock.inputStream)
 				} catch (_: URISyntaxException) {
 					HTTPResponse(400, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
 						.write(sock.outputStream)
-					throw EOFException()
+					throw IOException()
 				}
 				val host = request.headers["Host"]
 				if (host == null) {
 					HTTPResponse(400, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
 						.write(sock.outputStream)
-					throw EOFException()
+					throw IOException()
 				}
 				val redirection = redirectionTable[host]
 				if (redirection != null) {
@@ -78,7 +76,7 @@ fun secureOperation(
 							"Connection" to "close"
 						)
 					).write(sock.outputStream)
-					throw EOFException()
+					throw IOException()
 				}
 				val route = routingTable[host]
 				if (route != null) {
@@ -86,31 +84,50 @@ fun secureOperation(
 					val pipeSocket = Socket()
 					try {
 						pipeSocket.connect(InetSocketAddress("localhost", route), 4000)
-						val fqPIn = FailQuickInputStream(pipeSocket.inputStream)
-						val a = Thread.ofVirtual().start { fqPIn.transferTo(sock.outputStream) }
-						val b = Thread.ofVirtual().start { fqIn.transferTo(pipeSocket.outputStream) }
+						val remoteToLocal = Thread.ofVirtual().start {
+							try {
+								sock.inputStream.transferTo(pipeSocket.outputStream)
+							} catch (e: IOException) {
+								localLogger.warning {
+									"RTL exception: [${e.javaClass.canonicalName}]: ${e.localizedMessage}"
+								}
+							} finally {
+								sock.close()
+								pipeSocket.close()
+							}
+						}
+						val localToRemote = Thread.ofVirtual().start {
+							try {
+								pipeSocket.inputStream.transferTo(sock.outputStream)
+							} catch (e: IOException) {
+								localLogger.warning {
+									"LTR exception: [${e.javaClass.canonicalName}]: ${e.localizedMessage}"
+								}
+							} finally {
+								sock.close()
+								pipeSocket.close()
+							}
+						}
 						request.write(pipeSocket.outputStream)
-						a.join()
-						b.join()
-					} catch (_: SocketTimeoutException) {
-						localLogger.severe { "Host \"$host\" not responding for request: $request" }
-						HTTPResponse(503, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
-							.write(sock.outputStream)
+						remoteToLocal.join()
+						localToRemote.join()
 					} catch (e: IOException) {
 						localLogger.severe {
-							"Host \"$host\" refused for request " +
-									"[${e.javaClass.canonicalName}: ${e.localizedMessage}]: $request"
+							"Host \"$host\" refused! [${e.javaClass.canonicalName}: ${e.localizedMessage}]"
 						}
-						HTTPResponse(500, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
+						HTTPResponse(503, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
 							.write(sock.outputStream)
+					} finally {
+						sock.close()
+						pipeSocket.close()
 					}
-					pipeSocket.close()
 				} else {
 					localLogger.warning { "No route for host \"$host\", request: $request" }
 					HTTPResponse(404, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
 						.write(sock.outputStream)
 				}
-			} catch (_: FailQuickInputStream.EndOfStream) {
+			} catch (_: SocketTimeoutException) {
+			} catch (_: SocketException) {
 			} catch (e: IOException) {
 				localLogger.warning { "IO failure encountered; [${e.javaClass.canonicalName}] ${e.localizedMessage}" }
 			} finally {
