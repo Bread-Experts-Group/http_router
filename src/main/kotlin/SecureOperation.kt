@@ -1,4 +1,4 @@
-package org.bread_experts_group.router
+package org.bread_experts_group.http_router
 
 import org.bread_experts_group.http.HTTPRequest
 import org.bread_experts_group.http.HTTPResponse
@@ -10,6 +10,8 @@ import java.net.Socket
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.URISyntaxException
+import javax.net.ssl.ExtendedSSLSession
+import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLServerSocket
 import javax.net.ssl.SSLSocket
@@ -25,33 +27,36 @@ fun secureOperation(
 	while (true) {
 		secureLogger.finer("Waiting for next socket")
 		val sock = secureServerSocket.accept() as SSLSocket
+		val localLogger = ColoredLogger.newLogger("${secureLogger.name}.${sock.remoteSocketAddress}")
+		sock.addHandshakeCompletedListener {
+			localLogger.info {
+				buildString {
+					val s = sock.session as ExtendedSSLSession
+					appendLine("Handshake Complete : ${s.protocol} ${s.cipherSuite} \"${s.peerHost}:${s.peerPort}\"")
+					val reqNames = s.requestedServerNames.mapNotNull { (it as? SNIHostName)?.asciiName }
+					append("[${if (sock.applicationProtocol.isEmpty()) sock.applicationProtocol else "No ALPN"}] ")
+					appendLine(reqNames)
+					val (principal, certs) = try {
+						s.peerPrincipal to s.peerCertificates
+					} catch (_: SSLPeerUnverifiedException) {
+						null to null
+					}
+					if (principal != null && certs != null) {
+						appendLine("Peer Principal: ${principal.name}")
+						append("Peer Certificates:")
+						certs.forEachIndexed { index, c -> append("\n $index: ${c.type}, ${c.publicKey}") }
+					} else {
+						append("No peer authenticity")
+					}
+				}
+			}
+		}
 		sock.keepAlive = true
 		sock.soTimeout = 25000
 		sock.setSoLinger(true, 2)
 		Thread.ofVirtual().name("Routing-${sock.remoteSocketAddress}").start {
-			val localLogger = ColoredLogger.newLogger("${secureLogger.name}.${sock.remoteSocketAddress}")
 			try {
 				localLogger.fine("Thread start")
-				localLogger.info {
-					buildString {
-						val s = sock.session
-						appendLine("${s.protocol} ${s.cipherSuite} \"${s.peerHost}:${s.peerPort}\"")
-						val (principal, certs) = try {
-							s.peerPrincipal to s.peerCertificates
-						} catch (_: SSLPeerUnverifiedException) {
-							null to null
-						}
-						if (principal != null && certs != null) {
-							appendLine("Peer Principal: ${principal.name}")
-							appendLine("Peer Certificates:")
-							certs.forEachIndexed { index, c ->
-								appendLine(" $index: ${c.type}, pubkey: (${c.publicKey.format}, ${c.publicKey.algorithm})")
-							}
-						} else {
-							appendLine("No peer authenticity")
-						}
-					}
-				}
 				val request = try {
 					HTTPRequest.read(sock.inputStream)
 				} catch (_: URISyntaxException) {
@@ -126,7 +131,7 @@ fun secureOperation(
 						pipeSocket.close()
 					}
 				} else {
-					localLogger.warning { "No route for host \"$host\", request: $request" }
+					localLogger.warning { "No route for host \"$host\"" }
 					HTTPResponse(404, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
 						.write(sock.outputStream)
 				}

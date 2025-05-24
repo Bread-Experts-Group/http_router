@@ -1,4 +1,4 @@
-package org.bread_experts_group.router
+package org.bread_experts_group.http_router
 
 import org.bread_experts_group.http.HTTPRequest
 import org.bread_experts_group.http.HTTPResponse
