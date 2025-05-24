@@ -12,6 +12,7 @@ import java.net.SocketTimeoutException
 import java.net.URISyntaxException
 import javax.net.ssl.ExtendedSSLSession
 import javax.net.ssl.SNIHostName
+import javax.net.ssl.SSLHandshakeException
 import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLServerSocket
 import javax.net.ssl.SSLSocket
@@ -28,54 +29,62 @@ fun secureOperation(
 		secureLogger.finer("Waiting for next socket")
 		val sock = secureServerSocket.accept() as SSLSocket
 		val localLogger = ColoredLogger.newLogger("${secureLogger.name}.${sock.remoteSocketAddress}")
-		sock.addHandshakeCompletedListener {
-			localLogger.info {
-				buildString {
-					val s = sock.session as ExtendedSSLSession
-					appendLine("Handshake Complete : ${s.protocol} ${s.cipherSuite} \"${s.peerHost}:${s.peerPort}\"")
-					val reqNames = s.requestedServerNames.mapNotNull { (it as? SNIHostName)?.asciiName }
-					append("[${if (sock.applicationProtocol.isEmpty()) sock.applicationProtocol else "No ALPN"}] ")
-					appendLine(reqNames)
-					val (principal, certs) = try {
-						s.peerPrincipal to s.peerCertificates
-					} catch (_: SSLPeerUnverifiedException) {
-						null to null
-					}
-					if (principal != null && certs != null) {
-						appendLine("Peer Principal: ${principal.name}")
-						append("Peer Certificates:")
-						certs.forEachIndexed { index, c -> append("\n $index: ${c.type}, ${c.publicKey}") }
-					} else {
-						append("No peer authenticity")
-					}
-				}
-			}
-		}
 		sock.keepAlive = true
 		sock.soTimeout = 25000
 		sock.setSoLinger(true, 2)
 		Thread.ofVirtual().name("Routing-${sock.remoteSocketAddress}").start {
 			try {
-				localLogger.fine("Thread start")
-				val request = try {
-					HTTPRequest.read(sock.inputStream)
-				} catch (_: URISyntaxException) {
-					HTTPResponse(400, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
-						.write(sock.outputStream)
-					throw IOException()
+				sock.startHandshake()
+				val s = sock.session as ExtendedSSLSession
+				val reqNames = s.requestedServerNames.mapNotNull { (it as? SNIHostName)?.asciiName }
+				localLogger.info {
+					buildString {
+						appendLine("Handshake Complete: ${s.protocol} ${s.cipherSuite} \"${s.peerHost}:${s.peerPort}\"")
+						append("[${if (sock.applicationProtocol.isEmpty()) sock.applicationProtocol else "No ALPN"}] ")
+						appendLine(reqNames)
+						val (principal, certs) = try {
+							s.peerPrincipal to s.peerCertificates
+						} catch (_: SSLPeerUnverifiedException) {
+							null to null
+						}
+						if (principal != null && certs != null) {
+							appendLine("Peer Principal: ${principal.name}")
+							append("Peer Certificates:")
+							certs.forEachIndexed { index, c -> append("\n $index: ${c.type}, ${c.publicKey}") }
+						} else {
+							append("No peer authenticity")
+						}
+					}
 				}
-				val host = request.headers["Host"]
-				if (host == null) {
-					HTTPResponse(400, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
-						.write(sock.outputStream)
-					throw IOException()
+				var consumedRequest: HTTPRequest? = null
+				val host = if (reqNames.isNotEmpty()) {
+					val sniHost = reqNames.firstOrNull { (redirectionTable[it] != null) || (routingTable[it] != null) }
+					if (sniHost == null) throw IOException()
+					sniHost
+				} else {
+					val request = try {
+						HTTPRequest.read(sock.inputStream)
+					} catch (_: URISyntaxException) {
+						HTTPResponse(400, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
+							.write(sock.outputStream)
+						throw IOException()
+					}
+					consumedRequest = request
+					val readHost = request.headers["Host"]
+					if (readHost == null) {
+						if (reqNames.isEmpty())
+							HTTPResponse(400, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
+								.write(sock.outputStream)
+						throw IOException()
+					}
+					readHost
 				}
 				val redirection = redirectionTable[host]
 				if (redirection != null) {
 					val (uri, permanent) = redirection
 					localLogger.info { "Redirecting (${if (permanent) "permanent" else "temporary"}), $host -> $uri" }
 					HTTPResponse(
-						if (permanent) 308 else 307, request.version,
+						if (permanent) 308 else 307, HTTPVersion.HTTP_1_1,
 						mapOf(
 							"Location" to uri,
 							"Connection" to "close"
@@ -85,7 +94,7 @@ fun secureOperation(
 				}
 				val route = routingTable[host]
 				if (route != null) {
-					localLogger.info { "Routing, $host${request.path} -> $route" }
+					localLogger.info { "Routing, $host -> $route" }
 					val pipeSocket = Socket()
 					try {
 						pipeSocket.connect(InetSocketAddress("localhost", route), 4000)
@@ -117,7 +126,7 @@ fun secureOperation(
 								pipeSocket.close()
 							}
 						}
-						request.write(pipeSocket.outputStream)
+						consumedRequest?.write(pipeSocket.outputStream)
 						remoteToLocal.join()
 						localToRemote.join()
 					} catch (e: IOException) {
@@ -137,6 +146,7 @@ fun secureOperation(
 				}
 			} catch (_: SocketTimeoutException) {
 			} catch (_: SocketException) {
+			} catch (_: SSLHandshakeException) {
 			} catch (e: IOException) {
 				localLogger.warning { "IO failure encountered; [${e.javaClass.canonicalName}] ${e.localizedMessage}" }
 			} finally {
