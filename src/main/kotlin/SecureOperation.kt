@@ -32,7 +32,7 @@ fun secureOperation(
 			val localLogger = ColoredLogger.newLogger("${secureLogger.name}.${sock.remoteSocketAddress}")
 			try {
 				localLogger.fine("Thread start")
-				localLogger.fine {
+				localLogger.info {
 					buildString {
 						val s = sock.session
 						appendLine("${s.protocol} ${s.cipherSuite} \"${s.peerHost}:${s.peerPort}\"")
@@ -87,6 +87,8 @@ fun secureOperation(
 						val remoteToLocal = Thread.ofVirtual().start {
 							try {
 								sock.inputStream.transferTo(pipeSocket.outputStream)
+							} catch (_: SocketTimeoutException) {
+							} catch (_: SocketException) {
 							} catch (e: IOException) {
 								localLogger.warning {
 									"RTL exception: [${e.javaClass.canonicalName}]: ${e.localizedMessage}"
@@ -99,6 +101,8 @@ fun secureOperation(
 						val localToRemote = Thread.ofVirtual().start {
 							try {
 								pipeSocket.inputStream.transferTo(sock.outputStream)
+							} catch (_: SocketTimeoutException) {
+							} catch (_: SocketException) {
 							} catch (e: IOException) {
 								localLogger.warning {
 									"LTR exception: [${e.javaClass.canonicalName}]: ${e.localizedMessage}"

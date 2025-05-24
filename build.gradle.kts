@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "org.bread_experts_group"
-version = "2.2.0"
+version = "2.3.0"
 
 repositories {
 	mavenCentral()
@@ -19,15 +19,19 @@ repositories {
 }
 
 dependencies {
-	implementation("org.bread_experts_group:bread_server_lib-code:2.5.2")
+	implementation("org.bread_experts_group:bread_server_lib-code:2.8.1")
 }
 
 tasks.test {
 	useJUnitPlatform()
 }
 application {
-	mainClass = "org.bread_experts_group.router.RouterMainKt"
-	applicationDefaultJvmArgs = listOf("-XX:+UseZGC", "-XX:+ZGenerational", "-Xmx256m", "-XX:SoftMaxHeapSize=128m")
+	mainClass = "org.bread_experts_group.http_router.RouterMainKt"
+	applicationDefaultJvmArgs = listOf(
+		"-XX:+UseZGC", "-Xms256m", "-Xmx256m", "-XX:SoftMaxHeapSize=128m", "-server",
+		"-XX:MaxDirectMemorySize=128m", "-XX:+AlwaysPreTouch", "-XX:+UseLargePages",
+		"-XX:+DisableExplicitGC", "-XX:MaxTenuringThreshold=1", "-XX:MaxGCPauseMillis=20"
+	)
 }
 
 java {

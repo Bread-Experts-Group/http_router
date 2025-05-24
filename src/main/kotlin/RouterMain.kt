@@ -10,6 +10,10 @@ import org.bread_experts_group.stringToInt
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import javax.net.ssl.SNIHostName
+import javax.net.ssl.SNIMatcher
+import javax.net.ssl.SNIServerName
+import javax.net.ssl.StandardConstants
 
 fun main(args: Array<String>) {
 	val logger = ColoredLogger.newLogger("HTTP Routing, Main")
@@ -57,6 +61,22 @@ fun main(args: Array<String>) {
 		singleArgs.getValue("keystore_passphrase") as String,
 	)
 	val secureServerSocket = tlsSocket.getServerSocket()
+	val parameters = secureServerSocket.sslParameters
+	val routingTable = buildMap {
+		multipleArgs.getValue("route").forEach { routingDescriptor ->
+			val (host, targetPort) = (routingDescriptor as String).split(',')
+			this[host] = targetPort.toInt()
+		}
+	}
+	parameters.applicationProtocols = arrayOf("http/1.1")
+	parameters.sniMatchers = listOf(
+		object : SNIMatcher(StandardConstants.SNI_HOST_NAME) {
+			override fun matches(serverName: SNIServerName): Boolean =
+				(serverName as SNIHostName).asciiName in routingTable.keys
+		}
+	)
+	parameters.useCipherSuitesOrder = true
+	secureServerSocket.sslParameters = parameters
 	secureServerSocket.enabledCipherSuites = goodSchemes
 	secureServerSocket.wantClientAuth = true
 	logger.fine("- Secure socket (${singleArgs["port"]}) bind")
@@ -67,12 +87,6 @@ fun main(args: Array<String>) {
 		),
 	)
 	logger.info("- Server loop (${secureServerSocket.localSocketAddress}, ${insecureServerSocket.localSocketAddress})")
-	val routingTable = buildMap {
-		multipleArgs.getValue("route").forEach { routingDescriptor ->
-			val (host, targetPort) = (routingDescriptor as String).split(',')
-			this[host] = targetPort.toInt()
-		}
-	}
 	val redirectionTable = buildMap {
 		multipleArgs["redirect"]?.forEach { redirectionDescriptor ->
 			val (host, targetURI, permanent) = (redirectionDescriptor as String).split(',')
