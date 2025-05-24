@@ -40,7 +40,7 @@ fun secureOperation(
 				localLogger.info {
 					buildString {
 						appendLine("Handshake Complete: ${s.protocol} ${s.cipherSuite} \"${s.peerHost}:${s.peerPort}\"")
-						append("[${if (sock.applicationProtocol.isEmpty()) sock.applicationProtocol else "No ALPN"}] ")
+						append("[${sock.applicationProtocol.ifEmpty { "No ALPN" }}] ")
 						appendLine(reqNames)
 						val (principal, certs) = try {
 							s.peerPrincipal to s.peerCertificates
@@ -59,7 +59,7 @@ fun secureOperation(
 				var consumedRequest: HTTPRequest? = null
 				val host = if (reqNames.isNotEmpty()) {
 					val sniHost = reqNames.firstOrNull { (redirectionTable[it] != null) || (routingTable[it] != null) }
-					if (sniHost == null) throw IOException()
+					if (sniHost == null) throw SocketException()
 					sniHost
 				} else {
 					val request = try {
@@ -67,7 +67,7 @@ fun secureOperation(
 					} catch (_: URISyntaxException) {
 						HTTPResponse(400, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
 							.write(sock.outputStream)
-						throw IOException()
+						throw SocketException()
 					}
 					consumedRequest = request
 					val readHost = request.headers["Host"]
@@ -75,7 +75,7 @@ fun secureOperation(
 						if (reqNames.isEmpty())
 							HTTPResponse(400, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
 								.write(sock.outputStream)
-						throw IOException()
+						throw SocketException()
 					}
 					readHost
 				}
@@ -90,7 +90,7 @@ fun secureOperation(
 							"Connection" to "close"
 						)
 					).write(sock.outputStream)
-					throw IOException()
+					throw SocketException()
 				}
 				val route = routingTable[host]
 				if (route != null) {
