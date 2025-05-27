@@ -19,7 +19,6 @@ fun insecureOperation(
 		insecureLogger.finer("Waiting for next socket")
 		val sock = insecureServerSocket.accept()
 		sock.keepAlive = true
-		sock.soTimeout = 25000
 		sock.setSoLinger(true, 2)
 		Thread.ofVirtual().name("Routing-${sock.localSocketAddress}<${sock.remoteSocketAddress}").start {
 			val localLogger = ColoredLogger.newLogger("${insecureLogger.name}.${sock.remoteSocketAddress}")

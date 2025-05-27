@@ -30,7 +30,6 @@ fun secureOperation(
 		val sock = secureServerSocket.accept() as SSLSocket
 		val localLogger = ColoredLogger.newLogger("${secureLogger.name}.${sock.remoteSocketAddress}")
 		sock.keepAlive = true
-		sock.soTimeout = 25000
 		sock.setSoLinger(true, 2)
 		Thread.ofVirtual().name("Routing-${sock.remoteSocketAddress}").start {
 			try {
