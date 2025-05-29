@@ -18,23 +18,25 @@ val connectionStats = ConcurrentHashMap<String, ConnectionStats>()
 fun main(args: Array<String>) {
 	val logger = ColoredLogger.newLogger("Routing")
 	Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().unstarted {
-		logger.info("=== Router Stats ===")
-		val totalRx = 0L
-		val totalTx = 0L
-		val totalConnections = 0L
-		logger.info("Total received   : ${truncateSI(totalRx)}B")
-		logger.info("Total sent       : ${truncateSI(totalTx)}B")
-		logger.info("Total connections: $totalConnections")
-		ColoredLogger.flush()
+		println("=== Router Stats ===")
+		var totalRx = 0L
+		var totalTx = 0L
+		var totalConnections = 0L
 		connectionStats.forEach { (ipAddr, stats) ->
+			totalRx += stats.rx
+			totalTx += stats.tx
+			totalConnections += stats.connections
 			val localStat = buildString {
-				append(ipAddr)
-				append("- Received   : ${truncateSI(stats.rx)}B")
-				append("- Sent       : ${truncateSI(stats.tx)}B")
-				append("- Connections: ${stats.connections}")
+				appendLine(ipAddr)
+				appendLine("- Received   : ${truncateSI(stats.rx)}B")
+				appendLine("- Sent       : ${truncateSI(stats.tx)}B")
+				appendLine("- Connections: ${stats.connections}")
 			}
-			logger.info(localStat)
+			print(localStat)
 		}
+		println("Total received   : ${truncateSI(totalRx)}B")
+		println("Total sent       : ${truncateSI(totalTx)}B")
+		println("Total connections: $totalConnections")
 		ColoredLogger.flush()
 	})
 

@@ -16,7 +16,6 @@ fun insecureOperation(
 	while (true) {
 		val sock = insecureServerSocket.accept()
 		sock.keepAlive = true
-		sock.setSoLinger(true, 2)
 		Thread.ofVirtual().name("Routing-${sock.localSocketAddress}<${sock.remoteSocketAddress}").start {
 			val localLogger = ColoredLogger.newLogger("HTTP.${sock.remoteSocketAddress}")
 			try {

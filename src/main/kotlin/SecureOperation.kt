@@ -11,6 +11,7 @@ import java.net.Socket
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.URISyntaxException
+import java.util.concurrent.CountDownLatch
 import javax.net.ssl.ExtendedSSLSession
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLHandshakeException
@@ -29,10 +30,10 @@ fun secureOperation(
 		val remoteSockAddr = sock.remoteSocketAddress.toString()
 		val localLogger = ColoredLogger.newLogger("HTTPS $remoteSockAddr")
 		sock.keepAlive = true
-		sock.setSoLinger(true, 2)
 		Thread.ofVirtual().name("Routing $remoteSockAddr").start {
-			var rx = 0L
-			var tx = 0L
+			val pipeSocket = Socket()
+			val stats = connectionStats.getOrPut(sock.inetAddress.hostAddress) { ConnectionStats(0, 0, 0) }
+			stats.connections++
 			try {
 				sock.startHandshake()
 				val s = sock.session as ExtendedSSLSession
@@ -95,18 +96,19 @@ fun secureOperation(
 				val route = routingTable[host]
 				if (route != null) {
 					localLogger.info { "Routing, $host -> $route" }
-					val pipeSocket = Socket()
 					try {
 						pipeSocket.connect(InetSocketAddress("localhost", route), 4000)
-						val remoteToLocal = Thread.ofVirtual().start {
+						val countDown = CountDownLatch(2)
+						Thread.ofVirtual().start {
 							try {
-								val buffer = ByteArray(16384)
+								val buffer = ByteArray(sock.receiveBufferSize)
 								while (true) {
 									val read = sock.inputStream.read(buffer)
 									if (read == -1) break
+									stats.rx += read
 									pipeSocket.outputStream.write(buffer, 0, read)
-									rx += read
 								}
+								pipeSocket.shutdownOutput()
 							} catch (_: SocketTimeoutException) {
 							} catch (_: SocketException) {
 							} catch (e: IOException) {
@@ -114,19 +116,19 @@ fun secureOperation(
 									"RTL exception: [${e.javaClass.canonicalName}]: ${e.localizedMessage}"
 								}
 							} finally {
-								sock.close()
-								pipeSocket.close()
+								countDown.countDown()
 							}
 						}
-						val localToRemote = Thread.ofVirtual().start {
+						Thread.ofVirtual().start {
 							try {
-								val buffer = ByteArray(16384)
+								val buffer = ByteArray(sock.sendBufferSize)
 								while (true) {
 									val read = pipeSocket.inputStream.read(buffer)
 									if (read == -1) break
 									sock.outputStream.write(buffer, 0, read)
-									tx += read
+									stats.tx += read
 								}
+								sock.shutdownOutput()
 							} catch (_: SocketTimeoutException) {
 							} catch (_: SocketException) {
 							} catch (e: IOException) {
@@ -134,13 +136,11 @@ fun secureOperation(
 									"LTR exception: [${e.javaClass.canonicalName}]: ${e.localizedMessage}"
 								}
 							} finally {
-								sock.close()
-								pipeSocket.close()
+								countDown.countDown()
 							}
 						}
 						consumedRequest?.write(pipeSocket.outputStream)
-						remoteToLocal.join()
-						localToRemote.join()
+						countDown.await()
 					} catch (e: IOException) {
 						localLogger.severe {
 							"Host \"$host\" refused! [${e.javaClass.canonicalName}: ${e.localizedMessage}]"
@@ -157,19 +157,16 @@ fun secureOperation(
 						.write(sock.outputStream)
 				}
 			} catch (_: SocketTimeoutException) {
-			} catch (_: SocketException) {
 			} catch (_: SSLHandshakeException) {
+			} catch (_: SocketException) {
 			} catch (e: IOException) {
 				localLogger.warning { "IO failure encountered; [${e.javaClass.canonicalName}] ${e.localizedMessage}" }
 			} finally {
 				sock.close()
-			}
-			val stats = connectionStats.getOrPut(remoteSockAddr) { ConnectionStats(0, 0, 0) }
-			stats.rx += rx
-			stats.tx += tx
-			stats.connections++
-			localLogger.info {
-				"Connection finished; sent ${truncateSI(tx)}B, received ${truncateSI(rx)}B"
+				pipeSocket.close()
+				localLogger.info {
+					"Connection finished; sent ${truncateSI(stats.tx)}B, received ${truncateSI(stats.rx)}B"
+				}
 			}
 		}
 	}
