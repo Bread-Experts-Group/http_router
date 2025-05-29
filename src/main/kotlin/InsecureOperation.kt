@@ -10,18 +10,15 @@ import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.URISyntaxException
 
-private val insecureLogger = ColoredLogger.newLogger("HTTP Routing, Insecure")
-
 fun insecureOperation(
 	insecureServerSocket: ServerSocket
 ) = Runnable {
 	while (true) {
-		insecureLogger.finer("Waiting for next socket")
 		val sock = insecureServerSocket.accept()
 		sock.keepAlive = true
 		sock.setSoLinger(true, 2)
 		Thread.ofVirtual().name("Routing-${sock.localSocketAddress}<${sock.remoteSocketAddress}").start {
-			val localLogger = ColoredLogger.newLogger("${insecureLogger.name}.${sock.remoteSocketAddress}")
+			val localLogger = ColoredLogger.newLogger("HTTP.${sock.remoteSocketAddress}")
 			try {
 				localLogger.fine("Thread start")
 				val request = try {
@@ -33,7 +30,6 @@ fun insecureOperation(
 				}
 				val host = request.headers["Host"]
 				if (host == null) {
-					insecureLogger.warning("No host?")
 					HTTPResponse(400, request.version)
 						.write(sock.outputStream)
 					return@start

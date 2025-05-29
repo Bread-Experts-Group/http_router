@@ -7,13 +7,38 @@ import org.bread_experts_group.goodSchemes
 import org.bread_experts_group.logging.ColoredLogger
 import org.bread_experts_group.readArgs
 import org.bread_experts_group.stringToInt
+import org.bread_experts_group.truncateSI
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.util.concurrent.ConcurrentHashMap
+
+val connectionStats = ConcurrentHashMap<String, ConnectionStats>()
 
 fun main(args: Array<String>) {
-	val logger = ColoredLogger.newLogger("HTTP Routing, Main")
-	Thread.currentThread().name = "Routing-Main"
+	val logger = ColoredLogger.newLogger("Routing")
+	Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().start {
+		logger.info("=== Router Stats ===")
+		val totalRx = 0L
+		val totalTx = 0L
+		val totalConnections = 0L
+		logger.info("Total received   : ${truncateSI(totalRx)}B")
+		logger.info("Total sent       : ${truncateSI(totalTx)}B")
+		logger.info("Total connections: $totalConnections")
+		ColoredLogger.flush()
+		connectionStats.forEach { (ipAddr, stats) ->
+			val localStat = buildString {
+				append(ipAddr)
+				append("- Received   : ${truncateSI(stats.rx)}B")
+				append("- Sent       : ${truncateSI(stats.tx)}B")
+				append("- Connections: ${stats.connections}")
+			}
+			logger.info(localStat)
+		}
+		ColoredLogger.flush()
+	})
+
+	Thread.currentThread().name = "Routing Main"
 	logger.fine("- Argument read")
 	val (singleArgs, multipleArgs) = readArgs(
 		args,

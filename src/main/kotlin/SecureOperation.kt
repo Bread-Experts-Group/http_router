@@ -19,20 +19,18 @@ import javax.net.ssl.SSLServerSocket
 import javax.net.ssl.SSLSocket
 import kotlin.collections.forEachIndexed
 
-private val secureLogger = ColoredLogger.newLogger("HTTP Routing, Secure")
-
 fun secureOperation(
 	secureServerSocket: SSLServerSocket,
 	routingTable: Map<String, Int>,
 	redirectionTable: Map<String, Pair<String, Boolean>>
 ) = Runnable {
 	while (true) {
-		secureLogger.finer("Waiting for next socket")
 		val sock = secureServerSocket.accept() as SSLSocket
-		val localLogger = ColoredLogger.newLogger("${secureLogger.name}.${sock.remoteSocketAddress}")
+		val remoteSockAddr = sock.remoteSocketAddress.toString()
+		val localLogger = ColoredLogger.newLogger("HTTPS $remoteSockAddr")
 		sock.keepAlive = true
 		sock.setSoLinger(true, 2)
-		Thread.ofVirtual().name("Routing-${sock.remoteSocketAddress}").start {
+		Thread.ofVirtual().name("Routing $remoteSockAddr").start {
 			var rx = 0L
 			var tx = 0L
 			try {
@@ -166,8 +164,12 @@ fun secureOperation(
 			} finally {
 				sock.close()
 			}
+			val stats = connectionStats.getOrPut(remoteSockAddr) { ConnectionStats(0, 0, 0) }
+			stats.rx += rx
+			stats.tx += tx
+			stats.connections++
 			localLogger.info {
-				"Connection finished; sent ${truncateSI(tx, 2)}B, received ${truncateSI(rx, 2)}B"
+				"Connection finished; sent ${truncateSI(tx)}B, received ${truncateSI(rx)}B"
 			}
 		}
 	}
