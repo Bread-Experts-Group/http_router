@@ -17,7 +17,7 @@ val connectionStats = ConcurrentHashMap<String, ConnectionStats>()
 
 fun main(args: Array<String>) {
 	val logger = ColoredLogger.newLogger("Routing")
-	Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().start {
+	Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().unstarted {
 		logger.info("=== Router Stats ===")
 		val totalRx = 0L
 		val totalTx = 0L
