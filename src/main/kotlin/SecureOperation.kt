@@ -4,6 +4,7 @@ import org.bread_experts_group.http.HTTPRequest
 import org.bread_experts_group.http.HTTPResponse
 import org.bread_experts_group.http.HTTPVersion
 import org.bread_experts_group.logging.ColoredLogger
+import org.bread_experts_group.truncateSI
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -32,6 +33,8 @@ fun secureOperation(
 		sock.keepAlive = true
 		sock.setSoLinger(true, 2)
 		Thread.ofVirtual().name("Routing-${sock.remoteSocketAddress}").start {
+			var rx = 0L
+			var tx = 0L
 			try {
 				sock.startHandshake()
 				val s = sock.session as ExtendedSSLSession
@@ -99,7 +102,13 @@ fun secureOperation(
 						pipeSocket.connect(InetSocketAddress("localhost", route), 4000)
 						val remoteToLocal = Thread.ofVirtual().start {
 							try {
-								sock.inputStream.transferTo(pipeSocket.outputStream)
+								val buffer = ByteArray(16384)
+								while (true) {
+									val read = sock.inputStream.read(buffer)
+									if (read == -1) break
+									pipeSocket.outputStream.write(buffer, 0, read)
+									rx += read
+								}
 							} catch (_: SocketTimeoutException) {
 							} catch (_: SocketException) {
 							} catch (e: IOException) {
@@ -113,7 +122,13 @@ fun secureOperation(
 						}
 						val localToRemote = Thread.ofVirtual().start {
 							try {
-								pipeSocket.inputStream.transferTo(sock.outputStream)
+								val buffer = ByteArray(16384)
+								while (true) {
+									val read = pipeSocket.inputStream.read(buffer)
+									if (read == -1) break
+									sock.outputStream.write(buffer, 0, read)
+									tx += read
+								}
 							} catch (_: SocketTimeoutException) {
 							} catch (_: SocketException) {
 							} catch (e: IOException) {
@@ -150,6 +165,9 @@ fun secureOperation(
 				localLogger.warning { "IO failure encountered; [${e.javaClass.canonicalName}] ${e.localizedMessage}" }
 			} finally {
 				sock.close()
+			}
+			localLogger.info {
+				"Connection finished; sent ${truncateSI(tx, 2)}B, received ${truncateSI(rx, 2)}B"
 			}
 		}
 	}
