@@ -79,11 +79,11 @@ fun main(args: Array<String>) {
 		),
 	)
 	logger.fine("- TLS context and secure socket retrieval")
-	val tlsSocket = getTLSContext(
+	val tlsContext = getTLSContext(
 		File(singleArgs.getValue("keystore") as String),
 		singleArgs.getValue("keystore_passphrase") as String,
 	)
-	val secureServerSocket = tlsSocket.getServerSocket()
+	val secureServerSocket = tlsContext.getServerSocket()
 	val parameters = secureServerSocket.sslParameters
 	val routingTable = buildMap {
 		multipleArgs.getValue("route").forEach { routingDescriptor ->

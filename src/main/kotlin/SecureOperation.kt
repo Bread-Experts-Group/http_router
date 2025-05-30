@@ -6,19 +6,11 @@ import org.bread_experts_group.http.HTTPVersion
 import org.bread_experts_group.logging.ColoredLogger
 import org.bread_experts_group.truncateSI
 import java.io.IOException
-import java.net.InetSocketAddress
-import java.net.Socket
-import java.net.SocketException
-import java.net.SocketTimeoutException
-import java.net.URISyntaxException
+import java.io.InputStream
+import java.net.*
 import java.util.concurrent.CountDownLatch
-import javax.net.ssl.ExtendedSSLSession
-import javax.net.ssl.SNIHostName
-import javax.net.ssl.SSLHandshakeException
-import javax.net.ssl.SSLPeerUnverifiedException
-import javax.net.ssl.SSLServerSocket
-import javax.net.ssl.SSLSocket
-import kotlin.collections.forEachIndexed
+import javax.net.ssl.*
+
 
 fun secureOperation(
 	secureServerSocket: SSLServerSocket,
@@ -26,34 +18,32 @@ fun secureOperation(
 	redirectionTable: Map<String, Pair<String, Boolean>>
 ) = Runnable {
 	while (true) {
-		val sock = secureServerSocket.accept() as SSLSocket
-		val remoteSockAddr = sock.remoteSocketAddress.toString()
+		val socket = secureServerSocket.accept() as SSLSocket
+		socket.keepAlive = true
+		val remoteSockAddr = socket.remoteSocketAddress.toString()
 		val localLogger = ColoredLogger.newLogger("HTTPS $remoteSockAddr")
-		sock.keepAlive = true
 		Thread.ofVirtual().name("Routing $remoteSockAddr").start {
 			val pipeSocket = Socket()
-			val stats = connectionStats.getOrPut(sock.inetAddress.hostAddress) { ConnectionStats(0, 0, 0) }
+			val hostStr = (socket.remoteSocketAddress as InetSocketAddress).hostString
+			val stats = connectionStats.getOrPut(hostStr) { ConnectionStats(0, 0, 0) }
 			stats.connections++
 			try {
-				sock.startHandshake()
-				val s = sock.session as ExtendedSSLSession
+				val s = socket.session as ExtendedSSLSession
 				val reqNames = s.requestedServerNames.mapNotNull { (it as? SNIHostName)?.asciiName }
 				localLogger.info {
 					buildString {
-						appendLine("Handshake Complete: ${s.protocol} ${s.cipherSuite} \"${s.peerHost}:${s.peerPort}\"")
-						append("[${sock.applicationProtocol.ifEmpty { "No ALPN" }}] ")
-						appendLine(reqNames)
+						appendLine("Handshake Complete: ${s.protocol} ${s.cipherSuite}")
+						append("[${socket.applicationProtocol.ifEmpty { "No ALPN" }}] ")
+						append(reqNames)
 						val (principal, certs) = try {
 							s.peerPrincipal to s.peerCertificates
 						} catch (_: SSLPeerUnverifiedException) {
 							null to null
 						}
 						if (principal != null && certs != null) {
-							appendLine("Peer Principal: ${principal.name}")
+							appendLine("\nPeer Principal: ${principal.name}")
 							append("Peer Certificates:")
 							certs.forEachIndexed { index, c -> append("\n $index: ${c.type}, ${c.publicKey}") }
-						} else {
-							append("No peer authenticity")
 						}
 					}
 				}
@@ -64,10 +54,10 @@ fun secureOperation(
 					sniHost
 				} else {
 					val request = try {
-						HTTPRequest.read(sock.inputStream)
+						HTTPRequest.read(socket.inputStream)
 					} catch (_: URISyntaxException) {
 						HTTPResponse(400, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
-							.write(sock.outputStream)
+							.write(socket.outputStream)
 						throw SocketException()
 					}
 					consumedRequest = request
@@ -75,7 +65,7 @@ fun secureOperation(
 					if (readHost == null) {
 						if (reqNames.isEmpty())
 							HTTPResponse(400, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
-								.write(sock.outputStream)
+								.write(socket.outputStream)
 						throw SocketException()
 					}
 					readHost
@@ -90,27 +80,23 @@ fun secureOperation(
 							"Location" to uri,
 							"Connection" to "close"
 						)
-					).write(sock.outputStream)
+					).write(socket.outputStream)
 					throw SocketException()
 				}
 				val route = routingTable[host]
 				if (route != null) {
 					localLogger.info { "Routing, $host -> $route" }
 					try {
-						pipeSocket.connect(InetSocketAddress("localhost", route), 4000)
+						pipeSocket.connect(InetSocketAddress("localhost", route))
 						val countDown = CountDownLatch(2)
 						Thread.ofVirtual().start {
 							try {
-								val buffer = ByteArray(sock.receiveBufferSize)
-								while (true) {
-									val read = sock.inputStream.read(buffer)
-									if (read == -1) break
+								val buffer = ByteArray(socket.receiveBufferSize)
+								var read: Int
+								while (socket.inputStream.read(buffer).also { read = it } != -1) {
 									stats.rx += read
 									pipeSocket.outputStream.write(buffer, 0, read)
 								}
-								pipeSocket.shutdownOutput()
-							} catch (_: SocketTimeoutException) {
-							} catch (_: SocketException) {
 							} catch (e: IOException) {
 								localLogger.warning {
 									"RTL exception: [${e.javaClass.canonicalName}]: ${e.localizedMessage}"
@@ -121,16 +107,12 @@ fun secureOperation(
 						}
 						Thread.ofVirtual().start {
 							try {
-								val buffer = ByteArray(sock.sendBufferSize)
-								while (true) {
-									val read = pipeSocket.inputStream.read(buffer)
-									if (read == -1) break
-									sock.outputStream.write(buffer, 0, read)
+								val buffer = ByteArray(socket.sendBufferSize)
+								var read: Int
+								while (pipeSocket.inputStream.read(buffer).also { read = it } != -1) {
+									socket.outputStream.write(buffer, 0, read)
 									stats.tx += read
 								}
-								sock.shutdownOutput()
-							} catch (_: SocketTimeoutException) {
-							} catch (_: SocketException) {
 							} catch (e: IOException) {
 								localLogger.warning {
 									"LTR exception: [${e.javaClass.canonicalName}]: ${e.localizedMessage}"
@@ -141,20 +123,22 @@ fun secureOperation(
 						}
 						consumedRequest?.write(pipeSocket.outputStream)
 						countDown.await()
+						socket.shutdownOutput()
+						socket.shutdownInput()
 					} catch (e: IOException) {
 						localLogger.severe {
 							"Host \"$host\" refused! [${e.javaClass.canonicalName}: ${e.localizedMessage}]"
 						}
 						HTTPResponse(503, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
-							.write(sock.outputStream)
+							.write(socket.outputStream)
 					} finally {
-						sock.close()
+						socket.close()
 						pipeSocket.close()
 					}
 				} else {
 					localLogger.warning { "No route for host \"$host\"" }
 					HTTPResponse(404, HTTPVersion.HTTP_1_1, mapOf("Connection" to "close"))
-						.write(sock.outputStream)
+						.write(socket.outputStream)
 				}
 			} catch (_: SocketTimeoutException) {
 			} catch (_: SSLHandshakeException) {
@@ -162,7 +146,7 @@ fun secureOperation(
 			} catch (e: IOException) {
 				localLogger.warning { "IO failure encountered; [${e.javaClass.canonicalName}] ${e.localizedMessage}" }
 			} finally {
-				sock.close()
+				socket.close()
 				pipeSocket.close()
 				localLogger.info {
 					"Connection finished; sent ${truncateSI(stats.tx)}B, received ${truncateSI(stats.rx)}B"
