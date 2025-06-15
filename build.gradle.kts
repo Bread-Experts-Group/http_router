@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "org.bread_experts_group"
-version = "3.1.0"
+version = "3.4.0"
 
 repositories {
 	mavenCentral()
@@ -28,7 +28,7 @@ tasks.test {
 application {
 	mainClass = "org.bread_experts_group.http_router.RouterMainKt"
 	applicationDefaultJvmArgs = listOf(
-		"-XX:+UseZGC", "-Xms256m", "-Xmx256m", "-XX:SoftMaxHeapSize=128m", "-server",
+		"-XX:+UseZGC", "-Xms256m", "-Xmx1G", "-XX:SoftMaxHeapSize=128m", "-server",
 		"-XX:MaxDirectMemorySize=128m", "-XX:+AlwaysPreTouch", "-XX:+UseLargePages",
 		"-XX:+DisableExplicitGC", "-XX:MaxTenuringThreshold=1", "-XX:MaxGCPauseMillis=20",
 		"-Djdk.tls.rejectClientInitiatedRenegotiation=true"

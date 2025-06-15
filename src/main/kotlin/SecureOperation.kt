@@ -9,18 +9,17 @@ import org.bread_experts_group.http.HTTPRequest
 import org.bread_experts_group.http.HTTPResponse
 import org.bread_experts_group.http.HTTPVersion
 import org.bread_experts_group.logging.ColoredHandler
-import org.bread_experts_group.stream.FailQuickInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.*
 import java.nio.ByteBuffer
-import java.nio.channels.AsynchronousCloseException
 import java.nio.channels.ServerSocketChannel
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicLong
 import java.util.function.BiFunction
+import java.util.logging.Level
 import javax.net.ssl.*
 import kotlin.math.min
 
@@ -63,8 +62,20 @@ fun secureOperation(
 			engine.beginHandshake()
 			val tlsIn = ByteBuffer.allocate(engine.session.packetBufferSize)
 			var tlsOut = ByteBuffer.allocate(engine.session.packetBufferSize)
-			val dataIn = ByteBuffer.allocate(engine.session.applicationBufferSize)
+			var dataIn = ByteBuffer.allocate(engine.session.applicationBufferSize)
 			val dataOut = ByteBuffer.allocate(engine.session.applicationBufferSize)
+			val pipeSocket = Socket()
+			fun shutdown() {
+				if (sock.isOpen) {
+					sock.shutdownInput()
+					sock.shutdownOutput()
+				}
+				sock.close()
+				pipeSocket.close()
+				localLogger.info("Goodbye")
+			}
+			tlsIn.limit(0)
+			tlsOut.limit(0)
 			try {
 				var handshakeStatus = engine.handshakeStatus
 				while (
@@ -72,28 +83,48 @@ fun secureOperation(
 					handshakeStatus != SSLEngineResult.HandshakeStatus.NOT_HANDSHAKING
 				) when (handshakeStatus) {
 					SSLEngineResult.HandshakeStatus.NEED_UNWRAP -> {
-						stats.rx.addAndGet(sock.read(tlsIn).toLong())
-						tlsIn.flip()
 						val result = engine.unwrap(tlsIn, dataIn)
-						tlsIn.compact()
-						if (result.status != SSLEngineResult.Status.OK) TODO(result.status.name)
 						handshakeStatus = result.handshakeStatus
+						when (result.status) {
+							SSLEngineResult.Status.OK -> {}
+							SSLEngineResult.Status.BUFFER_UNDERFLOW -> {
+								tlsIn.compact()
+								stats.rx.addAndGet(sock.read(tlsIn).toLong())
+								tlsIn.flip()
+							}
+
+							SSLEngineResult.Status.CLOSED -> {
+								shutdown()
+								return@start
+							}
+
+							else -> throw IllegalStateException("Unexpected SSLEngineResult: $result")
+						}
 					}
 
 					SSLEngineResult.HandshakeStatus.NEED_WRAP -> {
-						tlsOut.clear()
 						val result = engine.wrap(dataOut, tlsOut)
-						tlsOut.flip()
-						stats.tx.addAndGet(sock.write(tlsOut).toLong())
+						handshakeStatus = result.handshakeStatus
 						when (result.status) {
-							SSLEngineResult.Status.OK -> {}
-							SSLEngineResult.Status.BUFFER_OVERFLOW -> {
-								tlsOut = ByteBuffer.allocate(engine.session.packetBufferSize)
+							SSLEngineResult.Status.OK -> {
+								tlsOut.flip()
+								stats.tx.addAndGet(sock.write(tlsOut).toLong())
+								tlsOut.clear()
 							}
 
-							else -> TODO(result.status.name)
+							SSLEngineResult.Status.BUFFER_OVERFLOW -> {
+								val newBuffer = ByteBuffer.allocate(engine.session.packetBufferSize)
+								newBuffer.put(tlsOut)
+								tlsOut = newBuffer
+							}
+
+							SSLEngineResult.Status.CLOSED -> {
+								shutdown()
+								return@start
+							}
+
+							else -> throw IllegalStateException("Unexpected SSLEngineResult: $result")
 						}
-						handshakeStatus = result.handshakeStatus
 					}
 
 					SSLEngineResult.HandshakeStatus.NEED_TASK -> {
@@ -115,7 +146,6 @@ fun secureOperation(
 				sock.close()
 				return@start
 			}
-			val pipeSocket = Socket()
 			try {
 				val s = engine.session as ExtendedSSLSession
 				val reqNames = s.requestedServerNames.mapNotNull { (it as? SNIHostName)?.asciiName }
@@ -136,7 +166,7 @@ fun secureOperation(
 						}
 					}
 				}
-				dataIn.flip()
+				dataIn.limit(0)
 				val selector = HTTPProtocolSelector(
 					when (engine.applicationProtocol) {
 						"h2" -> HTTPVersion.HTTP_2
@@ -145,24 +175,40 @@ fun secureOperation(
 						else -> HTTPVersion.HTTP_1_1
 					},
 					object : InputStream() {
+						private fun prepData() {
+							val result = engine.unwrap(tlsIn, dataIn)
+							when (result.status) {
+								SSLEngineResult.Status.OK -> {
+									dataIn.flip()
+									return
+								}
+
+								SSLEngineResult.Status.BUFFER_UNDERFLOW -> {
+									tlsIn.compact()
+									val read = sock.read(tlsIn).toLong()
+									if (read == -1L) throw IOException("Socket closed")
+									stats.rx.addAndGet(read)
+									tlsIn.flip()
+								}
+
+								SSLEngineResult.Status.BUFFER_OVERFLOW -> {
+									val newBuffer = ByteBuffer.allocate(engine.session.applicationBufferSize)
+									newBuffer.put(dataIn)
+									dataIn = newBuffer
+								}
+
+								SSLEngineResult.Status.CLOSED -> throw IOException("SSLEngine closed")
+								else -> throw IllegalStateException("Unexpected SSLEngineResult: $result")
+							}
+							return prepData()
+						}
+
 						override fun read(): Int {
 							if (dataIn.hasRemaining()) return dataIn.get().toInt()
-							if (!tlsIn.hasRemaining()) {
-								tlsIn.clear()
-								stats.rx.addAndGet(sock.read(tlsIn).toLong())
+							else {
+								prepData()
+								return dataIn.get().toInt()
 							}
-							tlsIn.flip()
-							while (tlsIn.hasRemaining()) {
-								dataIn.clear()
-								val result = engine.unwrap(tlsIn, dataIn)
-								when (result.status) {
-									SSLEngineResult.Status.OK -> {}
-									SSLEngineResult.Status.CLOSED -> throw FailQuickInputStream.EndOfStream()
-									else -> TODO(result.status.name)
-								}
-								dataIn.flip()
-							}
-							return dataIn.get().toInt()
 						}
 					},
 					object : OutputStream() {
@@ -171,40 +217,44 @@ fun secureOperation(
 						}
 
 						override fun write(b: ByteArray, off: Int, len: Int) {
-							var tx = 0
-							while (tx < len) {
-								val chunkSize = min(dataOut.capacity(), len - tx)
+							var position = 0
+							while (position < len) {
 								dataOut.clear()
-								dataOut.put(b, off + tx, chunkSize)
+								val length = min(len - position, dataOut.remaining())
+								dataOut.put(b, off + position, length)
+								position += length
 								dataOut.flip()
 
 								while (dataOut.hasRemaining()) {
 									tlsOut.clear()
 									val result = engine.wrap(dataOut, tlsOut)
-									if (result.status != SSLEngineResult.Status.OK) TODO(result.status.name)
-									tlsOut.flip()
-									while (tlsOut.hasRemaining()) stats.tx.addAndGet(sock.write(tlsOut).toLong())
-								}
+									when (result.status) {
+										SSLEngineResult.Status.OK -> {
+											tlsOut.flip()
+											while (tlsOut.hasRemaining()) {
+												val written = sock.write(tlsOut).toLong()
+												if (written == -1L) throw IOException("Socket closed")
+												stats.tx.addAndGet(written)
+											}
+										}
 
-								tx += chunkSize
+										SSLEngineResult.Status.CLOSED -> throw IOException("SSLEngine closed")
+										else -> throw IllegalStateException("Unexpected SSLEngineResult: $result")
+									}
+								}
 							}
 						}
 					},
 					true
 				)
 				val request: HTTPRequest = selector.nextRequest().getOrThrow()
-				val host = if (reqNames.isNotEmpty()) {
-					val sniHost = reqNames.firstOrNull { (redirectionTable[it] != null) || (routingTable[it] != null) }
-					if (sniHost == null) throw SocketException()
-					sniHost
-				} else {
-					val readHost = request.headers["Host"]
-					if (readHost == null) {
-						if (reqNames.isEmpty())
-							selector.sendResponse(HTTPResponse(request, 400))
-						throw SocketException()
-					}
-					readHost
+				val host = if (reqNames.isNotEmpty()) reqNames.firstOrNull {
+					(redirectionTable[it] != null) || (routingTable[it] != null)
+				} else request.headers["Host"]
+				if (host == null) {
+					selector.sendResponse(HTTPResponse(request, 400))
+					shutdown()
+					return@start
 				}
 				val redirection = redirectionTable[host]
 				if (redirection != null) {
@@ -228,31 +278,11 @@ fun secureOperation(
 					try {
 						pipeSocket.connect(InetSocketAddress("localhost", route))
 						val downgradeOutput = ByteArrayOutputStream()
-						val downgradeSelector = HTTPProtocolSelector(
-							HTTPVersion.HTTP_1_1,
-							null, downgradeOutput,
-							false
-						)
+						val downgradeSelector = HTTPProtocolSelector(HTTPVersion.HTTP_1_1, null, downgradeOutput, false)
 						val countDown = CountDownLatch(2)
-						var ltr: Thread? = null
-						val rtl = Thread.ofVirtual().name(Thread.currentThread().name + ".RTL").start {
-							try {
-								val rtlSelector = HTTPProtocolSelector(
-									HTTPVersion.HTTP_1_1,
-									null, pipeSocket.outputStream,
-									false
-								)
-								while (!Thread.currentThread().isInterrupted)
-									rtlSelector.sendRequest(selector.nextRequest().getOrThrow())
-							} catch (_: InterruptedException) {
-							} catch (_: IOException) {
-							} finally {
-								countDown.countDown()
-								ltr!!.interrupt()
-							}
-						}
-						rtl.uncaughtExceptionHandler = StandardUncaughtExceptionHandler(localLogger)
-						ltr = Thread.ofVirtual().name(Thread.currentThread().name + ".LTR").start {
+
+						lateinit var rtl: Thread
+						val ltr: Thread = Thread.ofVirtual().name("${Thread.currentThread().name}.LTR").start {
 							try {
 								val ltrSelector = HTTPProtocolSelector(
 									HTTPVersion.HTTP_1_1,
@@ -261,19 +291,43 @@ fun secureOperation(
 								)
 								while (!Thread.currentThread().isInterrupted)
 									selector.sendResponse(ltrSelector.nextResponse().getOrThrow())
-							} catch (_: InterruptedException) {
 							} catch (_: IOException) {
+							} catch (_: InterruptedException) {
+							} catch (e: Exception) {
+								localLogger.log(Level.WARNING, e) { "LTR operation problem" }
 							} finally {
 								countDown.countDown()
 								rtl.interrupt()
 							}
 						}
+
+						rtl = Thread.ofVirtual().name("${Thread.currentThread().name}.RTL").start {
+							try {
+								val rtlSelector = HTTPProtocolSelector(
+									HTTPVersion.HTTP_1_1,
+									null, pipeSocket.outputStream,
+									false
+								)
+								while (!Thread.currentThread().isInterrupted)
+									rtlSelector.sendRequest(selector.nextRequest().getOrThrow())
+							} catch (_: IOException) {
+							} catch (_: InterruptedException) {
+							} catch (e: Exception) {
+								localLogger.log(Level.WARNING, e) { "RTL operation problem" }
+							} finally {
+								countDown.countDown()
+								ltr.interrupt()
+							}
+						}
+
+						rtl.uncaughtExceptionHandler = StandardUncaughtExceptionHandler(localLogger)
 						ltr.uncaughtExceptionHandler = StandardUncaughtExceptionHandler(localLogger)
+
 						downgradeSelector.sendRequest(request)
 						downgradeOutput.writeTo(pipeSocket.outputStream)
+
 						countDown.await()
-						sock.shutdownOutput()
-						sock.shutdownInput()
+						pipeSocket.close()
 					} catch (e: IOException) {
 						localLogger.severe {
 							"Host \"$host\" refused! [${e.javaClass.canonicalName}: ${e.localizedMessage}]"
@@ -287,17 +341,9 @@ fun secureOperation(
 					localLogger.warning { "No route for host \"$host\"" }
 					selector.sendResponse(HTTPResponse(request, 404))
 				}
-			} catch (_: AsynchronousCloseException) {
-			} catch (e: IOException) {
-				localLogger.warning { "IO failure encountered; [${e.javaClass.canonicalName}] ${e.localizedMessage}" }
+			} catch (_: IOException) {
 			} finally {
-				if (sock.isOpen) {
-					sock.shutdownInput()
-					sock.shutdownOutput()
-				}
-				sock.close()
-				pipeSocket.close()
-				localLogger.info("Goodbye")
+				shutdown()
 			}
 		}.uncaughtExceptionHandler = StandardUncaughtExceptionHandler(localLogger)
 	}
