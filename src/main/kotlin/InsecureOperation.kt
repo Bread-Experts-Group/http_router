@@ -10,8 +10,8 @@ import org.bread_experts_group.stream.SocketChannelInputStream
 import org.bread_experts_group.stream.SocketChannelOutputStream
 import java.io.IOException
 import java.net.SocketException
-import java.net.SocketTimeoutException
 import java.net.StandardSocketOptions
+import java.nio.BufferUnderflowException
 import java.nio.channels.AsynchronousCloseException
 import java.nio.channels.ServerSocketChannel
 
@@ -51,14 +51,12 @@ fun insecureOperation(
 						)
 					)
 				}
-			} catch (_: SocketTimeoutException) {
+			} catch (_: BufferUnderflowException) {
 			} catch (_: SocketException) {
 			} catch (_: AsynchronousCloseException) {
 			} catch (e: IOException) {
 				localLogger.warning { "IO failure encountered; ${e.localizedMessage}" }
 			} finally {
-				sock.shutdownInput()
-				sock.shutdownOutput()
 				sock.close()
 			}
 		}.uncaughtExceptionHandler = StandardUncaughtExceptionHandler(localLogger)
