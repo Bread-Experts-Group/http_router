@@ -1,5 +1,4 @@
-import java.util.Properties
-import kotlin.apply
+import java.util.*
 
 plugins {
 	kotlin("jvm") version "2.1.10"
@@ -11,7 +10,7 @@ plugins {
 }
 
 group = "org.bread_experts_group"
-version = "3.4.0"
+version = "3.4.3"
 
 repositories {
 	mavenCentral()
@@ -19,7 +18,7 @@ repositories {
 }
 
 dependencies {
-	implementation("org.bread_experts_group:bread_server_lib-code:2.36.1")
+	implementation("org.bread_experts_group:bread_server_lib-code:2.36.2")
 }
 
 tasks.test {

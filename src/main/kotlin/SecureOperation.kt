@@ -13,7 +13,10 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
-import java.net.*
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.net.SocketException
+import java.net.StandardSocketOptions
 import java.nio.ByteBuffer
 import java.nio.channels.ServerSocketChannel
 import java.util.concurrent.CountDownLatch
@@ -204,10 +207,10 @@ fun secureOperation(
 						}
 
 						override fun read(): Int {
-							if (dataIn.hasRemaining()) return dataIn.get().toInt()
+							if (dataIn.hasRemaining()) return dataIn.get().toInt() and 0xFF
 							else {
 								prepData()
-								return dataIn.get().toInt()
+								return dataIn.get().toInt() and 0xFF
 							}
 						}
 					},
@@ -278,7 +281,12 @@ fun secureOperation(
 					try {
 						pipeSocket.connect(InetSocketAddress("localhost", route))
 						val downgradeOutput = ByteArrayOutputStream()
-						val downgradeSelector = HTTPProtocolSelector(HTTPVersion.HTTP_1_1, null, downgradeOutput, false)
+						val downgradeSelector = HTTPProtocolSelector(
+							HTTPVersion.HTTP_1_1,
+							null,
+							downgradeOutput,
+							false
+						)
 						val countDown = CountDownLatch(2)
 
 						lateinit var rtl: Thread
