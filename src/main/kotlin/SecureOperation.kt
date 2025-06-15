@@ -92,7 +92,9 @@ fun secureOperation(
 							SSLEngineResult.Status.OK -> {}
 							SSLEngineResult.Status.BUFFER_UNDERFLOW -> {
 								tlsIn.compact()
-								stats.rx.addAndGet(sock.read(tlsIn).toLong())
+								val read = sock.read(tlsIn).toLong()
+								if (read == -1L) throw IOException("Socket closed")
+								stats.rx.addAndGet(read)
 								tlsIn.flip()
 							}
 
@@ -140,13 +142,12 @@ fun secureOperation(
 
 					else -> TODO(engine.handshakeStatus.name)
 				}
-			} catch (e: SSLHandshakeException) {
-				localLogger.warning { "SSL Handshake exception; ${e.localizedMessage}" }
-				if (sock.isOpen) {
-					sock.shutdownInput()
-					sock.shutdownOutput()
-				}
-				sock.close()
+			} catch (_: IOException) {
+				shutdown()
+				return@start
+			} catch (e: Exception) {
+				localLogger.log(Level.WARNING, e) { "Problem during SSL handshake" }
+				shutdown()
 				return@start
 			}
 			try {
