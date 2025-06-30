@@ -10,15 +10,15 @@ plugins {
 }
 
 group = "org.bread_experts_group"
-version = "3.4.5"
+version = "3.5.0"
 
 repositories {
 	mavenCentral()
-	maven { url = uri("https://107-132-83-172.lightspeed.snantx.sbcglobal.net/") }
+	maven { url = uri("https://maven.breadexperts.group/") }
 }
 
 dependencies {
-	implementation("org.bread_experts_group:bread_server_lib-code:2.36.3")
+	implementation("org.bread_experts_group:bread_server_lib-code:2.46.2")
 }
 
 tasks.test {
@@ -30,7 +30,7 @@ application {
 		"-XX:+UseZGC", "-Xms256m", "-Xmx1G", "-XX:SoftMaxHeapSize=128m", "-server",
 		"-XX:MaxDirectMemorySize=128m", "-XX:+AlwaysPreTouch", "-XX:+UseLargePages",
 		"-XX:+DisableExplicitGC", "-XX:MaxTenuringThreshold=1", "-XX:MaxGCPauseMillis=20",
-		"-Djdk.tls.rejectClientInitiatedRenegotiation=true"
+		"-Djdk.tls.rejectClientInitiatedRenegotiation=true", "-XX:MaxDirectMemorySize=128m"
 	)
 }
 
@@ -63,7 +63,7 @@ publishing {
 			pom {
 				name = "Routing micro-server"
 				description = "Distribution of software for Bread Experts Group operated port/shared file routing servers."
-				url = "https://javart.zip"
+				url = "https://breadexperts.group"
 				signing {
 					sign(publishing.publications["mavenKotlin"])
 					sign(configurations.archives.get())
@@ -78,20 +78,20 @@ publishing {
 					developer {
 						id = "mikoe"
 						name = "Miko Elbrecht"
-						email = "miko@javart.zip"
+						email = "miko@breadexperts.group"
 					}
 				}
 				scm {
 					connection = "scm:git:git://github.com/Bread-Experts-Group/http_router.git"
 					developerConnection = "scm:git:ssh://git@github.com:Bread-Experts-Group/http_router.git"
-					url = "https://javart.zip"
+					url = "https://breadexperts.group"
 				}
 			}
 		}
 	}
 	repositories {
 		maven {
-			url = uri("https://107-132-83-172.lightspeed.snantx.sbcglobal.net/")
+			url = uri("https://maven.breadexperts.group/")
 			credentials {
 				username = localProperties["mavenUser"] as String
 				password = localProperties["mavenPassword"] as String
