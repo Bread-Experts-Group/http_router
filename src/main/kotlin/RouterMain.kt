@@ -17,7 +17,7 @@ val connectionStats = mutableMapOf<String, ConnectionStats>()
 
 val ipFlag = Flag(
 	"ips",
-	"The IP addresses on which to listen to.\nFormat: addr4http,addr4https]addr6http,addr4https",
+	"The IP addresses on which to listen to.\nFormat: addr4,addr6",
 	default = InetAddress.getLocalHost() to InetAddress.getLocalHost(),
 	conv = {
 		val (insecure, secure) = it
@@ -28,7 +28,7 @@ val ipFlag = Flag(
 	}
 )
 val portFlag = Flag(
-	"ports", "The TCP ports on which to listen to.\nFormat: port4http,port4https]port6http,port6https",
+	"ports", "The TCP ports on which to listen to.\nFormat: portHttp,portHttps",
 	default = 80 to 443,
 	conv = {
 		val selector = stringToInt(0..65535)

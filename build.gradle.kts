@@ -1,7 +1,7 @@
 import java.util.*
 
 plugins {
-	kotlin("jvm") version "2.1.10"
+	kotlin("jvm") version "2.2.0"
 	id("org.jetbrains.dokka-javadoc") version "2.0.0"
 	`maven-publish`
 	`java-library`
@@ -10,7 +10,7 @@ plugins {
 }
 
 group = "org.bread_experts_group"
-version = "3.5.2"
+version = "3.5.3"
 
 repositories {
 	mavenCentral()
@@ -18,7 +18,7 @@ repositories {
 }
 
 dependencies {
-	implementation("org.bread_experts_group:bread_server_lib-code:2.46.4")
+	implementation("org.bread_experts_group:bread_server_lib-code:2.47.1")
 }
 
 tasks.test {
@@ -39,7 +39,7 @@ java {
 	withSourcesJar()
 }
 kotlin {
-	jvmToolchain(21)
+	jvmToolchain(24)
 }
 tasks.register<Jar>("dokkaJavadocJar") {
 	dependsOn(tasks.dokkaGeneratePublicationJavadoc)

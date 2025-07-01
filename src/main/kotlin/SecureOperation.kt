@@ -9,7 +9,6 @@ import org.bread_experts_group.http.HTTPRequest
 import org.bread_experts_group.http.HTTPResponse
 import org.bread_experts_group.http.HTTPVersion
 import org.bread_experts_group.logging.ColoredHandler
-import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -281,13 +280,6 @@ fun secureOperation(
 					localLogger.info { "Routing, $host -> $route" }
 					try {
 						pipeSocket.connect(InetSocketAddress("localhost", route))
-						val downgradeOutput = ByteArrayOutputStream()
-						val downgradeSelector = HTTPProtocolSelector(
-							HTTPVersion.HTTP_1_1,
-							null,
-							downgradeOutput,
-							false
-						)
 						val countDown = CountDownLatch(2)
 
 						lateinit var rtl: Thread
@@ -332,8 +324,12 @@ fun secureOperation(
 						rtl.uncaughtExceptionHandler = StandardUncaughtExceptionHandler(localLogger)
 						ltr.uncaughtExceptionHandler = StandardUncaughtExceptionHandler(localLogger)
 
-						downgradeSelector.sendRequest(request)
-						downgradeOutput.writeTo(pipeSocket.outputStream)
+						HTTPProtocolSelector(
+							HTTPVersion.HTTP_1_1,
+							null,
+							pipeSocket.outputStream,
+							false
+						).sendRequest(request)
 
 						countDown.await()
 						pipeSocket.close()
