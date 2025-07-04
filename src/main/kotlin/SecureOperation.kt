@@ -332,7 +332,8 @@ fun secureOperation(
 						).sendRequest(request)
 
 						countDown.await()
-						pipeSocket.close()
+						pipeSocket.shutdownInput()
+						pipeSocket.shutdownOutput()
 					} catch (e: IOException) {
 						localLogger.severe {
 							"Host \"$host\" refused! [${e.javaClass.canonicalName}: ${e.localizedMessage}]"
@@ -340,7 +341,8 @@ fun secureOperation(
 						selector.sendResponse(HTTPResponse(request, 503))
 					} finally {
 						sock.close()
-						pipeSocket.close()
+						pipeSocket.shutdownInput()
+						pipeSocket.shutdownOutput()
 					}
 				} else {
 					localLogger.warning { "No route for host \"$host\"" }

@@ -61,7 +61,8 @@ fun main(args: Array<String>) {
 		Flag<String>(
 			"route",
 			"A route on which to direct requests towards, specified by the Host header (or SNI.)",
-			repeatable = true
+			repeatable = true,
+			required = 1
 		),
 		Flag<String>(
 			"redirect",

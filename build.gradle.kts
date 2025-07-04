@@ -10,7 +10,7 @@ plugins {
 }
 
 group = "org.bread_experts_group"
-version = "3.5.3"
+version = "4.0.0"
 
 repositories {
 	mavenCentral()
@@ -18,7 +18,7 @@ repositories {
 }
 
 dependencies {
-	implementation("org.bread_experts_group:bread_server_lib-code:2.47.1")
+	implementation("org.bread_experts_group:bread_server_lib-code:2.51.6")
 }
 
 tasks.test {
@@ -39,7 +39,7 @@ java {
 	withSourcesJar()
 }
 kotlin {
-	jvmToolchain(24)
+	jvmToolchain(21)
 }
 tasks.register<Jar>("dokkaJavadocJar") {
 	dependsOn(tasks.dokkaGeneratePublicationJavadoc)
