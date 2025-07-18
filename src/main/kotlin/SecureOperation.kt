@@ -1,29 +1,36 @@
 package org.bread_experts_group.http_router
 
 import org.bread_experts_group.StandardUncaughtExceptionHandler
+import org.bread_experts_group.channel.EmptyChannel
 import org.bread_experts_group.command_line.ArgumentContainer
 import org.bread_experts_group.getTLSContext
 import org.bread_experts_group.goodSchemes
-import org.bread_experts_group.http.HTTPProtocolSelector
-import org.bread_experts_group.http.HTTPRequest
-import org.bread_experts_group.http.HTTPResponse
-import org.bread_experts_group.http.HTTPVersion
 import org.bread_experts_group.logging.ColoredHandler
+import org.bread_experts_group.protocol.http.HTTPProtocolSelector
+import org.bread_experts_group.protocol.http.HTTPRequest
+import org.bread_experts_group.protocol.http.HTTPResponse
+import org.bread_experts_group.protocol.http.HTTPVersion
+import org.bread_experts_group.protocol.http.header.HTTPForwardedHeader
+import org.bread_experts_group.protocol.http.header.HTTPForwardee
+import org.bread_experts_group.protocol.http.header.HTTPForwardeeInet
+import org.bread_experts_group.protocol.http.header.HTTPForwardeeObfuscated
 import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
 import java.net.InetSocketAddress
-import java.net.Socket
 import java.net.SocketException
 import java.net.StandardSocketOptions
 import java.nio.ByteBuffer
+import java.nio.channels.ReadableByteChannel
 import java.nio.channels.ServerSocketChannel
+import java.nio.channels.SocketChannel
+import java.nio.channels.WritableByteChannel
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicLong
 import java.util.function.BiFunction
 import java.util.logging.Level
 import javax.net.ssl.*
 import kotlin.math.min
+
+val baseRejectHeaders = mapOf("connection" to "close")
 
 fun secureOperation(
 	secureServerSocket: ServerSocketChannel,
@@ -66,7 +73,7 @@ fun secureOperation(
 			var tlsOut = ByteBuffer.allocate(engine.session.packetBufferSize)
 			var dataIn = ByteBuffer.allocate(engine.session.applicationBufferSize)
 			val dataOut = ByteBuffer.allocate(engine.session.applicationBufferSize)
-			val pipeSocket = Socket()
+			val pipeSocket = SocketChannel.open()
 			fun shutdown() {
 				if (sock.isOpen) {
 					sock.shutdownInput()
@@ -177,7 +184,7 @@ fun secureOperation(
 						"http/0.9" -> HTTPVersion.HTTP_0_9
 						else -> HTTPVersion.HTTP_1_1
 					},
-					object : InputStream() {
+					object : ReadableByteChannel {
 						private fun prepData() {
 							val result = engine.unwrap(tlsIn, dataIn)
 							when (result.status) {
@@ -206,26 +213,33 @@ fun secureOperation(
 							return prepData()
 						}
 
-						override fun read(): Int {
-							if (dataIn.hasRemaining()) return dataIn.get().toInt() and 0xFF
-							else {
+						override fun read(dst: ByteBuffer): Int {
+							if (!dataIn.hasRemaining()) {
 								prepData()
-								return dataIn.get().toInt() and 0xFF
+								return read(dst)
 							}
-						}
-					},
-					object : OutputStream() {
-						override fun write(b: Int) {
-							write(byteArrayOf(b.toByte()), 0, 1)
+							val saved = dataIn.limit()
+							val transfer = min(dataIn.remaining(), dst.remaining())
+							dataIn.limit(dataIn.position() + transfer)
+							dst.put(dataIn)
+							dataIn.limit(saved)
+							return transfer
 						}
 
-						override fun write(b: ByteArray, off: Int, len: Int) {
-							var position = 0
-							while (position < len) {
+						override fun isOpen(): Boolean = throw UnsupportedOperationException()
+						override fun close() = throw UnsupportedOperationException()
+					},
+					object : WritableByteChannel {
+						override fun write(src: ByteBuffer): Int {
+							var written = 0
+							while (src.hasRemaining()) {
 								dataOut.clear()
-								val length = min(len - position, dataOut.remaining())
-								dataOut.put(b, off + position, length)
-								position += length
+								val saved = src.limit()
+								val transfer = min(src.remaining(), dataOut.remaining())
+								src.limit(transfer)
+								dataOut.put(src)
+								src.limit(saved)
+								written += transfer
 								dataOut.flip()
 
 								while (dataOut.hasRemaining()) {
@@ -246,16 +260,20 @@ fun secureOperation(
 									}
 								}
 							}
+							return written
 						}
+
+						override fun isOpen(): Boolean = throw UnsupportedOperationException()
+						override fun close() = throw UnsupportedOperationException()
 					},
 					true
 				)
 				val request: HTTPRequest = selector.nextRequest().getOrThrow()
 				val host = if (reqNames.isNotEmpty()) reqNames.firstOrNull {
 					(redirectionTable[it] != null) || (routingTable[it] != null)
-				} else request.headers["Host"]
+				} else request.headers["host"]
 				if (host == null) {
-					selector.sendResponse(HTTPResponse(request, 400))
+					selector.sendResponse(HTTPResponse(request, 400, baseRejectHeaders))
 					shutdown()
 					return@start
 				}
@@ -267,9 +285,8 @@ fun secureOperation(
 						HTTPResponse(
 							request,
 							if (permanent) 308 else 307,
-							mapOf(
-								"Location" to uri,
-								"Connection" to "close"
+							baseRejectHeaders + mapOf(
+								"location" to uri
 							)
 						)
 					)
@@ -287,11 +304,14 @@ fun secureOperation(
 							try {
 								val ltrSelector = HTTPProtocolSelector(
 									HTTPVersion.HTTP_1_1,
-									pipeSocket.inputStream, OutputStream.nullOutputStream(),
+									pipeSocket, EmptyChannel,
 									false
 								)
-								while (!Thread.currentThread().isInterrupted)
-									selector.sendResponse(ltrSelector.nextResponse().getOrThrow())
+								while (!Thread.currentThread().isInterrupted) {
+									val response = ltrSelector.nextResponse().getOrThrow()
+									response.headers.putIfAbsent("connection", "keep-alive")
+									selector.sendResponse(response)
+								}
 							} catch (_: IOException) {
 							} catch (_: InterruptedException) {
 							} catch (e: Exception) {
@@ -306,11 +326,23 @@ fun secureOperation(
 							try {
 								val rtlSelector = HTTPProtocolSelector(
 									HTTPVersion.HTTP_1_1,
-									null, pipeSocket.outputStream,
+									null, pipeSocket,
 									false
 								)
-								while (!Thread.currentThread().isInterrupted)
-									rtlSelector.sendRequest(selector.nextRequest().getOrThrow())
+								while (!Thread.currentThread().isInterrupted) {
+									val request = selector.nextRequest().getOrThrow()
+									val forwarded = HTTPForwardedHeader()
+									forwarded.forwardees.add(
+										HTTPForwardee(
+											HTTPForwardeeObfuscated("BSL http_router"),
+											HTTPForwardeeInet(sock.remoteAddress as InetSocketAddress),
+											null,
+											"https"
+										)
+									)
+									request.headers["forwarded"] = forwarded.toString()
+									rtlSelector.sendRequest(request)
+								}
 							} catch (_: IOException) {
 							} catch (_: InterruptedException) {
 							} catch (e: Exception) {
@@ -327,7 +359,7 @@ fun secureOperation(
 						HTTPProtocolSelector(
 							HTTPVersion.HTTP_1_1,
 							null,
-							pipeSocket.outputStream,
+							pipeSocket,
 							false
 						).sendRequest(request)
 
@@ -338,7 +370,7 @@ fun secureOperation(
 						localLogger.severe {
 							"Host \"$host\" refused! [${e.javaClass.canonicalName}: ${e.localizedMessage}]"
 						}
-						selector.sendResponse(HTTPResponse(request, 503))
+						selector.sendResponse(HTTPResponse(request, 503, baseRejectHeaders))
 					} finally {
 						sock.close()
 						pipeSocket.shutdownInput()
@@ -346,7 +378,7 @@ fun secureOperation(
 					}
 				} else {
 					localLogger.warning { "No route for host \"$host\"" }
-					selector.sendResponse(HTTPResponse(request, 404))
+					selector.sendResponse(HTTPResponse(request, 404, baseRejectHeaders))
 				}
 			} catch (_: IOException) {
 			} finally {

@@ -2,12 +2,10 @@ package org.bread_experts_group.http_router
 
 import org.bread_experts_group.StandardUncaughtExceptionHandler
 import org.bread_experts_group.command_line.ArgumentContainer
-import org.bread_experts_group.http.HTTPProtocolSelector
-import org.bread_experts_group.http.HTTPResponse
-import org.bread_experts_group.http.HTTPVersion
 import org.bread_experts_group.logging.ColoredHandler
-import org.bread_experts_group.stream.SocketChannelInputStream
-import org.bread_experts_group.stream.SocketChannelOutputStream
+import org.bread_experts_group.protocol.http.HTTPProtocolSelector
+import org.bread_experts_group.protocol.http.HTTPResponse
+import org.bread_experts_group.protocol.http.HTTPVersion
 import java.io.IOException
 import java.net.SocketException
 import java.net.StandardSocketOptions
@@ -26,8 +24,8 @@ fun insecureOperation(
 		sock.setOption(StandardSocketOptions.SO_KEEPALIVE, true)
 		val selector = HTTPProtocolSelector(
 			HTTPVersion.HTTP_1_1,
-			SocketChannelInputStream(sock),
-			SocketChannelOutputStream(sock),
+			sock,
+			sock,
 			true
 		)
 		val localLogger = ColoredHandler.newLogger("HTTP.${sock.remoteAddress}")
@@ -35,7 +33,7 @@ fun insecureOperation(
 			try {
 				while (true) {
 					val request = selector.nextRequest().getOrThrow()
-					val host = request.headers["Host"]
+					val host = request.headers["host"]
 					if (host == null) {
 						selector.sendResponse(HTTPResponse(request, 400))
 						continue
@@ -45,8 +43,8 @@ fun insecureOperation(
 							request,
 							308,
 							mapOf(
-								"Location" to "https://$host${request.path}",
-								"Connection" to "close"
+								"location" to "https://$host${request.path}",
+								"connection" to "close"
 							)
 						)
 					)
