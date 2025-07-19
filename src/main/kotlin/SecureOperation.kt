@@ -24,7 +24,6 @@ import java.nio.channels.ServerSocketChannel
 import java.nio.channels.SocketChannel
 import java.nio.channels.WritableByteChannel
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.atomic.AtomicLong
 import java.util.function.BiFunction
 import java.util.logging.Level
 import javax.net.ssl.*
@@ -47,9 +46,7 @@ fun secureOperation(
 		val sock = secureServerSocket.accept()
 		sock.setOption(StandardSocketOptions.SO_KEEPALIVE, true)
 		val remoteAddress = sock.remoteAddress as InetSocketAddress
-		val stats = connectionStats.getOrPut(remoteAddress.hostString) {
-			ConnectionStats(AtomicLong(), AtomicLong(), 0)
-		}
+		val stats = connectionStats.getOrPut(remoteAddress.hostString) { ConnectionStats() }
 		stats.connections++
 		val localLogger = ColoredHandler.newLogger("HTTPS.$remoteAddress")
 		Thread.ofVirtual().name("HTTPS.$remoteAddress").start {
@@ -81,7 +78,7 @@ fun secureOperation(
 				}
 				sock.close()
 				pipeSocket.close()
-				localLogger.info("Goodbye")
+				localLogger.info("Goodbye $stats")
 			}
 			tlsIn.limit(0)
 			tlsOut.limit(0)
@@ -177,7 +174,7 @@ fun secureOperation(
 					}
 				}
 				dataIn.limit(0)
-				val selector = HTTPProtocolSelector(
+				val mainSelector = HTTPProtocolSelector(
 					when (engine.applicationProtocol) {
 						"h2" -> HTTPVersion.HTTP_2
 						"http/1.0" -> HTTPVersion.HTTP_1_0
@@ -268,12 +265,14 @@ fun secureOperation(
 					},
 					true
 				)
-				val request: HTTPRequest = selector.nextRequest().getOrThrow()
+				val initialRequest: HTTPRequest = mainSelector.nextRequest().getOrThrow()
+				stats.requests.incrementAndGet()
 				val host = if (reqNames.isNotEmpty()) reqNames.firstOrNull {
 					(redirectionTable[it] != null) || (routingTable[it] != null)
-				} else request.headers["host"]
+				} else initialRequest.headers["host"]
 				if (host == null) {
-					selector.sendResponse(HTTPResponse(request, 400, baseRejectHeaders))
+					stats.responses.incrementAndGet()
+					mainSelector.sendResponse(HTTPResponse(initialRequest, 400, baseRejectHeaders))
 					shutdown()
 					return@start
 				}
@@ -281,13 +280,12 @@ fun secureOperation(
 				if (redirection != null) {
 					val (uri, permanent) = redirection
 					localLogger.info { "Redirecting (${if (permanent) "permanent" else "temporary"}), $host -> $uri" }
-					selector.sendResponse(
+					stats.responses.incrementAndGet()
+					mainSelector.sendResponse(
 						HTTPResponse(
-							request,
+							initialRequest,
 							if (permanent) 308 else 307,
-							baseRejectHeaders + mapOf(
-								"location" to uri
-							)
+							baseRejectHeaders + mapOf("location" to uri)
 						)
 					)
 					throw SocketException()
@@ -310,7 +308,8 @@ fun secureOperation(
 								while (!Thread.currentThread().isInterrupted) {
 									val response = ltrSelector.nextResponse().getOrThrow()
 									response.headers.putIfAbsent("connection", "keep-alive")
-									selector.sendResponse(response)
+									stats.responses.incrementAndGet()
+									mainSelector.sendResponse(response)
 								}
 							} catch (_: IOException) {
 							} catch (_: InterruptedException) {
@@ -324,15 +323,8 @@ fun secureOperation(
 
 						rtl = Thread.ofVirtual().name("${Thread.currentThread().name}.RTL").start {
 							try {
-								val rtlSelector = HTTPProtocolSelector(
-									HTTPVersion.HTTP_1_1,
-									null, pipeSocket,
-									false
-								)
-								while (!Thread.currentThread().isInterrupted) {
-									val request = selector.nextRequest().getOrThrow()
-									val forwarded = HTTPForwardedHeader()
-									forwarded.forwardees.add(
+								val forwarded = HTTPForwardedHeader().let {
+									it.forwardees.add(
 										HTTPForwardee(
 											HTTPForwardeeObfuscated("BSL http_router"),
 											HTTPForwardeeInet(sock.remoteAddress as InetSocketAddress),
@@ -340,7 +332,19 @@ fun secureOperation(
 											"https"
 										)
 									)
-									request.headers["forwarded"] = forwarded.toString()
+									it.toString()
+								}
+								val rtlSelector = HTTPProtocolSelector(
+									HTTPVersion.HTTP_1_1,
+									null, pipeSocket,
+									false
+								)
+								initialRequest.headers["forwarded"] = forwarded
+								rtlSelector.sendRequest(initialRequest)
+								while (!Thread.currentThread().isInterrupted) {
+									val request = mainSelector.nextRequest().getOrThrow()
+									stats.requests.incrementAndGet()
+									request.headers["forwarded"] = forwarded
 									rtlSelector.sendRequest(request)
 								}
 							} catch (_: IOException) {
@@ -356,13 +360,6 @@ fun secureOperation(
 						rtl.uncaughtExceptionHandler = StandardUncaughtExceptionHandler(localLogger)
 						ltr.uncaughtExceptionHandler = StandardUncaughtExceptionHandler(localLogger)
 
-						HTTPProtocolSelector(
-							HTTPVersion.HTTP_1_1,
-							null,
-							pipeSocket,
-							false
-						).sendRequest(request)
-
 						countDown.await()
 						pipeSocket.shutdownInput()
 						pipeSocket.shutdownOutput()
@@ -370,7 +367,8 @@ fun secureOperation(
 						localLogger.severe {
 							"Host \"$host\" refused! [${e.javaClass.canonicalName}: ${e.localizedMessage}]"
 						}
-						selector.sendResponse(HTTPResponse(request, 503, baseRejectHeaders))
+						stats.responses.incrementAndGet()
+						mainSelector.sendResponse(HTTPResponse(initialRequest, 503, baseRejectHeaders))
 					} finally {
 						sock.close()
 						pipeSocket.shutdownInput()
@@ -378,7 +376,8 @@ fun secureOperation(
 					}
 				} else {
 					localLogger.warning { "No route for host \"$host\"" }
-					selector.sendResponse(HTTPResponse(request, 404, baseRejectHeaders))
+					stats.responses.incrementAndGet()
+					mainSelector.sendResponse(HTTPResponse(initialRequest, 404, baseRejectHeaders))
 				}
 			} catch (_: IOException) {
 			} finally {

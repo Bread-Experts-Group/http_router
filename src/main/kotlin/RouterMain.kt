@@ -61,8 +61,7 @@ fun main(args: Array<String>) {
 		Flag<String>(
 			"route",
 			"A route on which to direct requests towards, specified by the Host header (or SNI.)",
-			repeatable = true,
-			required = 1
+			repeatable = true
 		),
 		Flag<String>(
 			"redirect",
@@ -72,7 +71,7 @@ fun main(args: Array<String>) {
 	)
 
 	val routingTable = buildMap {
-		arguments.getsRequired<String>("route").forEach { routingDescriptor ->
+		arguments.gets<String>("route")?.forEach { routingDescriptor ->
 			val (host, targetPort) = routingDescriptor.split(',')
 			this[host] = targetPort.toInt()
 		}
